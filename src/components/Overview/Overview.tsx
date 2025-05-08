@@ -4,6 +4,30 @@ import * as am5xy from '@amcharts/amcharts5/xy';
 import * as am5stock from '@amcharts/amcharts5/stock';
 import am5themes_Animated from '@amcharts/amcharts5/themes/Animated';
 import './Overview.css';
+import deviceConfigs from '../../config/deviceConfigs.json';
+
+// Type definitions for deviceConfigs
+type DataField = {
+  name: string;
+  type: string;
+  multiplier: number;
+  aggregation: string;
+  index: number;
+};
+
+type DeviceTypeConfig = {
+  inverter?: DataField[];
+  analizor?: DataField[];
+  rtu?: DataField[];
+};
+
+type GesConfig = {
+  [key: string]: DeviceTypeConfig;
+};
+
+type DeviceConfigs = {
+  [key: string]: GesConfig;
+};
 
 // TypeScript için window.electronAPI global tanımı
 // Eğer global.d.ts dosyan yoksa, bu dosyanın başına ekleyebilirsin
@@ -22,14 +46,14 @@ declare global {
 const Overview: React.FC = () => {
   const chartRef = useRef<am5stock.StockChart | null>(null);
   const rootRef = useRef<am5.Root | null>(null);
-  const [mqttData, setMqttData] = useState<string | null>(null);
   const [selectedIl, setSelectedIl] = useState('');
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
   const [aracVerisi, setAracVerisi] = useState<string | null>(null);
+  const [selectedVariable, setSelectedVariable] = useState('');
+  const [availableVariables, setAvailableVariables] = useState<DataField[]>([]);
 
   // Yeni: Veritabanı ve tablo isimleri için state
-  const [dbNames, setDbNames] = useState<string[]>([]);
   const [ilList, setIlList] = useState<string[]>([]);
   const [gesList, setGesList] = useState<string[]>([]);
   const [aracList, setAracList] = useState<string[]>([]);
@@ -59,7 +83,6 @@ const Overview: React.FC = () => {
       console.log('Tüm veritabanı ve tablo isimleri:', all);
       setAllTables(all);
       const names = Object.keys(all);
-      setDbNames(names);
       // İl adlarını benzersiz olarak bul
       const ilSet = new Set<string>();
       names.forEach(name => {
@@ -74,7 +97,7 @@ const Overview: React.FC = () => {
   useEffect(() => {
     if (selectedIl) {
       const gesSet = new Set<string>();
-      dbNames.forEach(name => {
+      Object.keys(allTables).forEach(name => {
         const [il, ...gesArr] = name.split('_');
         if (il === selectedIl && gesArr.length > 0) {
           gesSet.add(gesArr.join('_'));
@@ -90,7 +113,7 @@ const Overview: React.FC = () => {
       setAracList([]);
       setSelectedArac('');
     }
-  }, [selectedIl, dbNames]);
+  }, [selectedIl, allTables]);
 
   // GES seçilince tablo (araç) listesini hazırdan getir
   useEffect(() => {
@@ -124,8 +147,6 @@ const Overview: React.FC = () => {
 
     // Dinleyici fonksiyonu
     const handler = (data: string, incomingTopic?: string) => {
-      console.log('MQTT gelen topic:', incomingTopic, 'Veri:', data);
-      setMqttData(data);
       if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
         setAracVerisi(data);
       }
@@ -136,9 +157,67 @@ const Overview: React.FC = () => {
 
     // Temizlik: component unmount veya seçim değişince dinleyiciyi kaldır
     return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
+      if (typeof unsubscribe === 'function') unsubscribe();         //alt satırdakilerden birinde effevt olursa unsubscribe çalışacak
     };
   }, [selectedIl, selectedGes, selectedArac]);
+
+  // Get device type from table name
+  function getDeviceType(tablename: string) {
+    if (!tablename) return '';
+    const lower = tablename.toLowerCase();
+    if (lower.startsWith('inv')) return 'inverter';
+    if (lower.startsWith('analizor')) return 'analizor';
+    if (lower.startsWith('rtu')) return 'rtu';
+    return '';
+  }
+
+  // Update available variables when device selection changes
+  useEffect(() => {
+    if (!selectedIl || !selectedGes || !selectedArac) {
+      setAvailableVariables([]);
+      setSelectedVariable('');
+      return;
+    }
+
+    const deviceType = getDeviceType(selectedArac);
+    if (!deviceType) {
+      setAvailableVariables([]);
+      setSelectedVariable('');
+      return;
+    }
+
+    // Use capitalize for both selectedIl and selectedGes to match JSON keys
+    const configCap = (deviceConfigs as DeviceConfigs)[capitalize(selectedIl)]?.[capitalize(selectedGes)]?.[deviceType as keyof DeviceTypeConfig];
+    if (configCap) {
+      setAvailableVariables(configCap as DataField[]);
+    } else {
+      setAvailableVariables([]);
+    }
+    setSelectedVariable('');
+  }, [selectedIl, selectedGes, selectedArac]);
+
+  // Parse MQTT data and get selected variable value
+  const selectedValue = useMemo(() => {
+    if (!aracVerisi || !selectedVariable) return null;
+    try {
+      const data = JSON.parse(aracVerisi);
+      if (!Array.isArray(data)) return null;
+      const variableConfig = Array.isArray(availableVariables)
+        ? availableVariables.find(v => v.name === selectedVariable)
+        : undefined;
+      if (!variableConfig) return null;
+      const variableIndex = variableConfig.index;
+      if (variableIndex === undefined) return null;
+      const value = data[variableIndex + 1];
+      if (value === undefined) return null;
+      // const multiplier = variableConfig.multiplier || 1;
+      // return (value * multiplier).toFixed(2);
+      return value;
+    } catch (error) {
+      console.error('Error parsing MQTT data:', error);
+      return null;
+    }
+  }, [aracVerisi, selectedVariable, availableVariables]);
 
   useEffect(() => {
     // Create root element
@@ -592,37 +671,65 @@ const Overview: React.FC = () => {
   console.log('Overview render');
 
   return (
-    <div className="overview-page">
-      <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <select value={selectedIl} onChange={e => {
-          setSelectedIl(e.target.value);
-        }}>
-          <option value="">İl seçiniz</option>
-          {ilList.map(il => <option key={il} value={il}>{il}</option>)}
+    <div className="overview-container">
+      <div className="selection-container">
+        <select 
+          value={selectedIl} 
+          onChange={(e) => setSelectedIl(e.target.value)}
+          className="select-box"
+        >
+          <option value="">İl Seçiniz</option>
+          {ilList.map((il) => (
+            <option key={il} value={il}>{il}</option>
+          ))}
         </select>
-        <select value={selectedGes} onChange={e => {
-          setSelectedGes(e.target.value);
-        }} disabled={!selectedIl}>
-          <option value="">GES seçiniz</option>
-          {gesList.map(ges => <option key={ges} value={ges}>{ges}</option>)}
+
+        <select 
+          value={selectedGes} 
+          onChange={(e) => setSelectedGes(e.target.value)}
+          className="select-box"
+          disabled={!selectedIl}
+        >
+          <option value="">GES Seçiniz</option>
+          {gesList.map((ges) => (
+            <option key={ges} value={ges}>{ges}</option>
+          ))}
         </select>
-        <select value={selectedArac} onChange={e => setSelectedArac(e.target.value)} disabled={!selectedGes || !aracList || aracList.length === 0}>
-          <option value="">Araç (Tablo) seçiniz</option>
-          {(aracList || []).map(arac => <option key={arac} value={arac}>{arac}</option>)}
+
+        <select 
+          value={selectedArac} 
+          onChange={(e) => setSelectedArac(e.target.value)}
+          className="select-box"
+          disabled={!selectedGes}
+        >
+          <option value="">Araç Seçiniz</option>
+          {aracList.map((arac) => (
+            <option key={arac} value={arac}>{arac}</option>
+          ))}
         </select>
+
+        <select 
+          value={selectedVariable} 
+          onChange={(e) => setSelectedVariable(e.target.value)}
+          className="select-box"
+          disabled={!selectedArac || !Array.isArray(availableVariables) || availableVariables.length === 0}
+        >
+          <option value="">Değişken Seçiniz</option>
+          {Array.isArray(availableVariables) && availableVariables.map((config) => (
+            <option key={config.name} value={config.name}>{config.name}</option>
+          ))}
+        </select>
+
+        {selectedValue !== null && selectedVariable && (
+          <div className="selected-value">
+            Değer: {selectedValue}
+          </div>
+        )}
       </div>
-      {selectedIl && selectedGes && selectedArac && (
-        <div style={{ background: '#222', color: '#fff', padding: 12, borderRadius: 8, marginBottom: 16 }}>
-          <b>Seçili Araç (Tablo) Verisi:</b>
-          <pre style={{ color: '#a259ff', fontSize: 13 }}>{aracVerisi || 'Veri bekleniyor...'}</pre>
-        </div>
-      )}
-      <div className="chart-controls" id="chartcontrols"></div>
-      <div className="chart-container" id="chartdiv"></div>
-      <div style={{color: 'white', background: '#222', padding: 8, marginTop: 16, borderRadius: 4}}>
-        <b>MQTT'den Gelen Veri:</b>
-        <pre style={{color: 'lime', fontSize: 12}}>{mqttData}</pre>
-      </div>
+
+      {/* amCharts toolbar container */}
+      <div id="chartcontrols" className="chart-controls"></div>
+      <div id="chartdiv" className="chart-container"></div>
     </div>
   );
 };
