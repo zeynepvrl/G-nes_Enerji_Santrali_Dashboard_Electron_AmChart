@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Veri tiplerini ve anlamlarını tutacak interface
-interface DataField {
+// veri tiplerini ve anlamlarını tutacak interface
+interface datafield {
   name: string;
   type: string;
   multiplier: number;
@@ -10,36 +10,36 @@ interface DataField {
   index: number;
 }
 
-// Her araç tipi için veri alanlarını tutacak interface
-type DeviceFields = DataField[];
+// her araç tipi için veri alanlarını tutacak interface
+type devicefields = datafield[];
 
-// Her GES için araç konfigürasyonlarını tutacak interface
-interface DeviceConfig {
-  [deviceType: string]: DeviceFields;
+// her ges için araç konfigürasyonlarını tutacak interface
+interface deviceconfig {
+  [devicetype: string]: devicefields;
 }
 
-// Her GES için araç konfigürasyonlarını tutacak interface
-interface GesConfig {
-  [gesName: string]: DeviceConfig;
+// her ges için araç konfigürasyonlarını tutacak interface
+interface gesconfig {
+  [gesname: string]: deviceconfig;
 }
 
-// Tüm konfigürasyonları tutacak ana interface
-interface AllConfigs {
-  [ilName: string]: GesConfig;
+// tüm konfigürasyonları tutacak ana interface
+interface allconfigs {
+  [ilname: string]: gesconfig;
 }
 
-function parseConfigLine(line: string, index: number): DataField | null {
+function parseconfigline(line: string, index: number): datafield | null {
   if (!line.trim() || line.startsWith('#') || line.includes(':')) return null;
-  // Remove trailing semicolon
-  const cleanLine = line.replace(/;$/, '');
-  const parts = cleanLine.split(',');
+  // remove trailing semicolon
+  const cleanline = line.replace(/;$/, '');
+  const parts = cleanline.split(',');
 
-  // RTU: address,name,type
+  // rtu: address,name,type
   if (parts.length === 3) {
     const [address, name, type] = parts;
     return {
-      name: name.trim(),
-      type: type.trim(),
+      name: name.trim().toLowerCase().replace(/;$/, ''),
+      type: type.trim().toLowerCase(),
       multiplier: 1,
       aggregation: '',
       index
@@ -49,8 +49,8 @@ function parseConfigLine(line: string, index: number): DataField | null {
   if (parts.length === 4) {
     const [address, type, multiplier, name] = parts;
     return {
-      name: name.trim(),
-      type: type.trim(),
+      name: name.trim().toLowerCase().replace(/;$/, ''),
+      type: type.trim().toLowerCase(),
       multiplier: parseFloat(multiplier) || 1,
       aggregation: '',
       index
@@ -59,146 +59,148 @@ function parseConfigLine(line: string, index: number): DataField | null {
   // address,type,multiplier,name,aggregation
   if (parts.length >= 5) {
     const [address, type, multiplier, name, aggregation = ''] = parts;
-  return {
-    name: name.trim(),
-    type: type.trim(),
+    return {
+      name: name.trim().toLowerCase().replace(/;$/, ''),
+      type: type.trim().toLowerCase(),
       multiplier: parseFloat(multiplier) || 1,
-      aggregation: aggregation.trim() as 'avg' | 'last' | '',
+      aggregation: aggregation.trim().toLowerCase() as 'avg' | 'last' | '',
       index
-  };
+    };
   }
   return null;
 }
 
-function readDeviceConfig(filePath: string): DataField[] {
-  const content = fs.readFileSync(filePath, 'utf-8');
+function readdeviceconfig(filepath: string): datafield[] {
+  const content = fs.readFileSync(filepath, 'utf-8');
   const lines = content.split('\n');
-  const fields: DataField[] = [];
+  const fields: datafield[] = [];
 
-  let fieldIndex = 0;
+  let fieldindex = 0;
   lines.forEach(line => {
-    const field = parseConfigLine(line, fieldIndex);
+    const field = parseconfigline(line, fieldindex);
     if (field) {
       fields.push(field);
-      fieldIndex++;
+      fieldindex++;
     }
   });
 
   return fields;
 }
 
-function generateConfigs(): AllConfigs {
+function generateconfigs(): allconfigs {
   // settings klasörü artık config klasörünün içinde
-  const settingsDir = path.join(__dirname, 'settings');
-  const configs: AllConfigs = {};
+  const settingsdir = path.join(__dirname, 'settings');
+  const configs: allconfigs = {};
 
-  // Her il klasörünü tara
-  const ilDirs = fs.readdirSync(settingsDir);
-  ilDirs.forEach(ilDir => {
-    const ilPath = path.join(settingsDir, ilDir);
-    if (!fs.statSync(ilPath).isDirectory()) return;
+  // her il klasörünü tara
+  const ildirs = fs.readdirSync(settingsdir);
+  ildirs.forEach(ildir => {
+    const ilpath = path.join(settingsdir, ildir);
+    if (!fs.statSync(ilpath).isDirectory()) return;
 
-    const [ilName, gesName] = ilDir.split('_');
-    if (!ilName || !gesName) return;
+    const [rawIlname, rawGesname] = ildir.split('_');
+    const ilname = rawIlname.trim().toLowerCase();
+    const gesname = rawGesname.trim().toLowerCase();
+    if (!ilname || !gesname) return;
 
-    // İl için GES konfigürasyonlarını başlat
-    if (!configs[ilName]) {
-      configs[ilName] = {};
+    // il için ges konfigürasyonlarını başlat
+    if (!configs[ilname]) {
+      configs[ilname] = {};
     }
 
-    // GES için araç konfigürasyonlarını oku
-    const deviceConfigs: DeviceConfig = {};
-    const configFiles = fs.readdirSync(ilPath);
+    // ges için araç konfigürasyonlarını oku
+    const deviceconfigs: deviceconfig = {};
+    const configfiles = fs.readdirSync(ilpath);
     
-    configFiles.forEach(file => {
+    configfiles.forEach(file => {
       if (file.endsWith('_config.txt')) {
-        const deviceType = file.split('_')[0]; // inverter, rtu, analizor
-        const configPath = path.join(ilPath, file);
-        deviceConfigs[deviceType] = readDeviceConfig(configPath);
+        const devicetype = file.split('_')[0]; // inverter, rtu, analizor
+        const configpath = path.join(ilpath, file);
+        deviceconfigs[devicetype] = readdeviceconfig(configpath);
       }
     });
 
-    configs[ilName][gesName] = deviceConfigs;
+    configs[ilname][gesname] = deviceconfigs;
   });
 
   return configs;
 }
 
-function generateConfigFile(configs: AllConfigs) {
-  // 1. JS dosyasını oluştur
-  const jsOutputPath = path.join(__dirname, '..', 'deviceConfigs.js');
-  let content = `// Bu dosya otomatik olarak oluşturulmuştur. Lütfen manuel olarak düzenlemeyin.
-// Son güncelleme: ${new Date().toISOString()}
+function generateconfigfile(configs: allconfigs) {
+  // 1. js dosyasını oluştur
+  const jsoutputpath = path.join(__dirname, '..', 'deviceconfigs.js');
+  let content = `// bu dosya otomatik olarak oluşturulmuştur. lütfen manuel olarak düzenlemeyin.
+// son güncelleme: ${new Date().toISOString()}
 
-const deviceConfigs = ${JSON.stringify(configs, null, 2)};
+const deviceconfigs = ${JSON.stringify(configs, null, 2)};
 
-// Yardımcı fonksiyonlar
-function getDataValue(data, ilName, gesName, deviceType, fieldName) {
-  const config = deviceConfigs[ilName]?.[gesName]?.[deviceType]?.[fieldName];
+// yardımcı fonksiyonlar
+function getdatavalue(data, ilname, gesname, devicetype, fieldname) {
+  const config = deviceconfigs[ilname]?.[gesname]?.[devicetype]?.[fieldname];
   if (!config) {
-    throw new Error('Invalid configuration: ' + ilName + '.' + gesName + '.' + deviceType + '.' + fieldName);
+    throw new Error('invalid configuration: ' + ilname + '.' + gesname + '.' + devicetype + '.' + fieldname);
   }
-  // Veri indeksini bul (config dosyasındaki sıraya göre)
-  const fields = Object.keys(deviceConfigs[ilName][gesName][deviceType]);
-  const index = fields.indexOf(fieldName);
+  // veri indeksini bul (config dosyasındaki sıraya göre)
+  const fields = Object.keys(deviceconfigs[ilname][gesname][devicetype]);
+  const index = fields.indexOf(fieldname);
   if (index === -1) {
-    throw new Error('Field not found: ' + fieldName);
+    throw new Error('field not found: ' + fieldname);
   }
-  const rawValue = data[index + 1]; // +1 because first element is timestamp
-  return rawValue * config.multiplier;
+  const rawvalue = data[index + 1]; // +1 because first element is timestamp
+  return rawvalue * config.multiplier;
 }
 
-function getAvailableFields(ilName, gesName, deviceType) {
-  return Object.keys(deviceConfigs[ilName]?.[gesName]?.[deviceType] || {});
+function getavailablefields(ilname, gesname, devicetype) {
+  return Object.keys(deviceconfigs[ilname]?.[gesname]?.[devicetype] || {});
 }
 
-function getDeviceTypes(ilName, gesName) {
-  return Object.keys(deviceConfigs[ilName]?.[gesName] || {});
+function getdevicetypes(ilname, gesname) {
+  return Object.keys(deviceconfigs[ilname]?.[gesname] || {});
 }
 
-function getGesList(ilName) {
-  return Object.keys(deviceConfigs[ilName] || {});
+function getgeslist(ilname) {
+  return Object.keys(deviceconfigs[ilname] || {});
 }
 
-function getIlList() {
-  return Object.keys(deviceConfigs);
+function getillist() {
+  return Object.keys(deviceconfigs);
 }
 
 module.exports = {
-  deviceConfigs,
-  getDataValue,
-  getAvailableFields,
-  getDeviceTypes,
-  getGesList,
-  getIlList
+  deviceconfigs,
+  getdatavalue,
+  getavailablefields,
+  getdevicetypes,
+  getgeslist,
+  getillist
 };
 `;
 
-  // JS çıktısı için dizin oluştur ve yaz
-  const jsOutputDir = path.dirname(jsOutputPath);
-  if (!fs.existsSync(jsOutputDir)) {
-    fs.mkdirSync(jsOutputDir, { recursive: true });
+  // js çıktısı için dizin oluştur ve yaz
+  const jsoutputdir = path.dirname(jsoutputpath);
+  if (!fs.existsSync(jsoutputdir)) {
+    fs.mkdirSync(jsoutputdir, { recursive: true });
   }
-  fs.writeFileSync(jsOutputPath, content);
-  console.log(`Konfigürasyon dosyası oluşturuldu: ${jsOutputPath}`);
+  fs.writeFileSync(jsoutputpath, content);
+  console.log(`konfigürasyon dosyası oluşturuldu: ${jsoutputpath}`);
 
-  // 2. JSON dosyasını oluştur
-  const jsonOutputDir = path.join(__dirname, '../src/config');
-  const jsonOutputPath = path.join(jsonOutputDir, 'deviceConfigs.json');
-  if (!fs.existsSync(jsonOutputDir)) {
-    fs.mkdirSync(jsonOutputDir, { recursive: true });
+  // 2. json dosyasını oluştur
+  const jsonoutputdir = path.join(__dirname, '../src/config');
+  const jsonoutputpath = path.join(jsonoutputdir, 'deviceconfigs.json');
+  if (!fs.existsSync(jsonoutputdir)) {
+    fs.mkdirSync(jsonoutputdir, { recursive: true });
   }
-  fs.writeFileSync(jsonOutputPath, JSON.stringify(configs, null, 2), 'utf-8');
-  console.log('deviceConfigs.json başarıyla oluşturuldu:', jsonOutputPath);
+  fs.writeFileSync(jsonoutputpath, JSON.stringify(configs, null, 2), 'utf-8');
+  console.log('deviceconfigs.json başarıyla oluşturuldu:', jsonoutputpath);
 }
 
-// Ana fonksiyon
+// ana fonksiyon
 function main() {
   try {
-    const configs = generateConfigs();
-    generateConfigFile(configs);
+    const configs = generateconfigs();
+    generateconfigfile(configs);
   } catch (error) {
-    console.error('Hata:', error);
+    console.error('hata:', error);
     process.exit(1);
   }
 }

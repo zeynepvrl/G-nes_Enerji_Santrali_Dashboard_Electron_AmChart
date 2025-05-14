@@ -7,8 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Unsubscribe fonksiyonu döndür
     return () => ipcRenderer.removeListener('mqtt-data', listener);
   },
-  getDatabases: () => ipcRenderer.invoke('get-databases'),
-  getTables: (dbName) => ipcRenderer.invoke('get-tables', dbName),
+  getTablesHistory: (dbName, tableName, limit, startDate, endDate) => ipcRenderer.invoke('get-tables', dbName, tableName, limit, startDate, endDate),
   getAllTables: () => ipcRenderer.invoke('get-all-tables'),
   subscribeMqtt: (topic) => ipcRenderer.invoke('subscribe-mqtt', topic)
 }); 

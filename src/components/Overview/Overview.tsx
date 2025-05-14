@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as am5 from '@amcharts/amcharts5';
 import * as am5xy from '@amcharts/amcharts5/xy';
 import * as am5stock from '@amcharts/amcharts5/stock';
@@ -34,8 +34,7 @@ type DeviceConfigs = {
 declare global {
   interface Window {
     electronAPI: {
-      getDatabases: () => Promise<{ datname: string }[]>;
-      getTables: (dbName: string) => Promise<string[]>;
+      getTablesHistory: (dbName: string, tableName?: string, limit?: number, startDate?: Date, endDate?: Date) => Promise<any[]>;
       onMqttData: (callback: (data: string, topic?: string) => void) => void;
       getAllTables: () => Promise<{ [dbName: string]: string[] }>;
       subscribeMqtt: (topic: string) => void;
@@ -52,6 +51,21 @@ const Overview: React.FC = () => {
   const [aracVerisi, setAracVerisi] = useState<string | null>(null);
   const [selectedVariable, setSelectedVariable] = useState('');
   const [availableVariables, setAvailableVariables] = useState<DataField[]>([]);
+  const [timeInterval, setTimeInterval] = useState<{
+    timeUnit: "minute" | "hour";
+    count: number;
+  }>({ timeUnit: "minute", count: 1 });
+
+  // Veri buffer'ları için state'ler
+  const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
+  const [candlestickData, setCandlestickData] = useState<{
+    timestamp: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }[]>([]);
 
   // Yeni: Veritabanı ve tablo isimleri için state
   const [ilList, setIlList] = useState<string[]>([]);
@@ -76,11 +90,21 @@ const Overview: React.FC = () => {
     return '';
   }
 
+   // Get device type from table name
+   function getDeviceType(tablename: string) {
+    if (!tablename) return '';
+    const lower = tablename.toLowerCase();
+    if (lower.startsWith('inv')) return 'inverter';
+    if (lower.startsWith('analizor')) return 'analizor';
+    if (lower.startsWith('rtu')) return 'rtu';
+    return '';
+  }
+
   // Tüm veritabanları ve tablo isimlerini başta çek
   useEffect(() => {
     if (!window.electronAPI?.getAllTables) return;
     window.electronAPI.getAllTables().then((all) => {
-      console.log('Tüm veritabanı ve tablo isimleri:', all);
+      //console.log('Tüm veritabanı ve tablo isimleri:', all);
       setAllTables(all);
       const names = Object.keys(all);
       // İl adlarını benzersiz olarak bul
@@ -131,6 +155,32 @@ const Overview: React.FC = () => {
   useEffect(() => {
     setAracVerisi(null);
   }, [selectedIl, selectedGes, selectedArac]);
+  
+  // Update available variables when device selection changes
+  useEffect(() => {
+    if (!selectedIl || !selectedGes || !selectedArac) {
+      setAvailableVariables([]);
+      setSelectedVariable('');
+      return;
+    }
+
+    const deviceType = getDeviceType(selectedArac);
+    if (!deviceType) {
+      setAvailableVariables([]);
+      setSelectedVariable('');
+      return;
+    }
+
+    // Use capitalize for both selectedIl and selectedGes to match JSON keys
+    const configCap = (deviceConfigs as DeviceConfigs)[selectedIl]?.[selectedGes]?.[deviceType as keyof DeviceTypeConfig];
+    if (configCap) {
+      setAvailableVariables(configCap as DataField[]);
+    } else {
+      setAvailableVariables([]);
+    }
+    setSelectedVariable('');
+  }, [selectedIl, selectedGes, selectedArac]);
+
 
   // Seçilen il, GES ve araç'a göre MQTT topic'ini dinle
   useEffect(() => {
@@ -159,42 +209,40 @@ const Overview: React.FC = () => {
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();         //alt satırdakilerden birinde effevt olursa unsubscribe çalışacak
     };
-  }, [selectedIl, selectedGes, selectedArac]);
+  }, [selectedArac]);
 
-  // Get device type from table name
-  function getDeviceType(tablename: string) {
-    if (!tablename) return '';
-    const lower = tablename.toLowerCase();
-    if (lower.startsWith('inv')) return 'inverter';
-    if (lower.startsWith('analizor')) return 'analizor';
-    if (lower.startsWith('rtu')) return 'rtu';
-    return '';
-  }
+ 
 
-  // Update available variables when device selection changes
+  // Seçilen değişken değiştiğinde geçmiş verileri çek ve grafiği doldur
   useEffect(() => {
-    if (!selectedIl || !selectedGes || !selectedArac) {
-      setAvailableVariables([]);
-      setSelectedVariable('');
-      return;
-    }
+    if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
+    if (selectedArac === "" || selectedVariable === "") return;
 
-    const deviceType = getDeviceType(selectedArac);
-    if (!deviceType) {
-      setAvailableVariables([]);
-      setSelectedVariable('');
-      return;
-    }
+    const dbName = `${selectedIl}_${selectedGes}`;
+    const variableConfig = availableVariables.find(v => v.name === selectedVariable);
+    if (!variableConfig) return;
 
-    // Use capitalize for both selectedIl and selectedGes to match JSON keys
-    const configCap = (deviceConfigs as DeviceConfigs)[capitalize(selectedIl)]?.[capitalize(selectedGes)]?.[deviceType as keyof DeviceTypeConfig];
-    if (configCap) {
-      setAvailableVariables(configCap as DataField[]);
-    } else {
-      setAvailableVariables([]);
-    }
-    setSelectedVariable('');
-  }, [selectedIl, selectedGes, selectedArac]);
+    window.electronAPI.getTablesHistory(dbName, selectedArac, 1000)
+      .then(records => {
+        if (records && records.length > 0) {
+          console.log('records:', records);
+          
+          const rawData = records.map(record => {
+            const value = record[variableConfig.name];   
+            return {
+              timestamp: new Date(record.timestamp).getTime(),
+              value: value
+            };
+          });// yiter yiter ne bu heyecan
+          // SIRALAMA: Eski -> Yeni
+          rawData.sort((a, b) => a.timestamp - b.timestamp);
+          setDataBuffer(rawData); // Sadece buffer'ı güncelle
+        }
+      })
+      .catch(error => {
+        console.error('Geçmiş veriler çekilirken hata:', error);
+      });
+  }, [selectedVariable]);
 
   // Parse MQTT data and get selected variable value
   const selectedValue = useMemo(() => {
@@ -210,16 +258,81 @@ const Overview: React.FC = () => {
       if (variableIndex === undefined) return null;
       const value = data[variableIndex + 1];
       if (value === undefined) return null;
-      // const multiplier = variableConfig.multiplier || 1;
-      // return (value * multiplier).toFixed(2);
+
+      console.log('MQTT gelen verinin timestampi:', data[0]);
+      // Add new data point to buffer
+      const newDataPoint = {
+        timestamp: new Date(data[0]).getTime(),
+        value: value
+      };
+      
+      
+      // Update buffer using functional update to avoid stale closures
+      setDataBuffer(prev => {
+        const newBuffer = [...prev, newDataPoint];
+        return newBuffer;
+      });
+
+      console.log('MQTT  data buffer şu an ', dataBuffer);
+
       return value;
     } catch (error) {
       console.error('Error parsing MQTT data:', error);
       return null;
     }
-  }, [aracVerisi, selectedVariable, availableVariables]);
+  }, [aracVerisi, selectedVariable]);
+  
 
+  // Zaman aralığı veya dataBuffer değiştiğinde sadece gruplama yap
   useEffect(() => {
+    if (dataBuffer.length === 0) return;
+    // Zaman aralığına göre timestamp'i yuvarla
+    const getRoundedTimestamp = (timestamp: number) => {
+      const { timeUnit, count } = timeInterval;
+      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+      return Math.floor(timestamp / ms) * ms;
+    };
+    // Seçilen zaman aralığına göre gruplama
+    const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
+    dataBuffer.forEach(d => {
+      const roundedTime = getRoundedTimestamp(d.timestamp);
+      if (!grouped.has(roundedTime)) {
+        grouped.set(roundedTime, { values: [], timestamps: [] });
+      }
+      grouped.get(roundedTime)!.values.push(d.value);
+      grouped.get(roundedTime)!.timestamps.push(d.timestamp);
+    });
+    // Her zaman aralığı için bir mum oluştur
+    const newCandles = Array.from(grouped.entries()).map(([time, group]) => {
+      const values = group.values;
+      return {
+        timestamp: time,
+        open: values[0],
+        high: Math.max(...values),
+        low: Math.min(...values),
+        close: values[values.length - 1],
+        volume: values.length
+      };
+    });
+    
+    setCandlestickData(newCandles);
+    console.log('candles:', newCandles);
+  }, [dataBuffer, timeInterval]);
+
+
+  // Period değişikliğini yöneten fonksiyon
+  const handlePeriodChange = useCallback((newInterval: { timeUnit: "minute" | "hour", count: number }) => {
+    setTimeInterval(newInterval);
+  }, []);
+
+  // Ana effect - selectedArac değişikliğini dinler
+  useEffect(() => {
+    if (!selectedArac) return;
+
+    // Grafik oluşturulmadan önce DOM'u temizle
+    const chartDiv = document.getElementById('chartdiv');
+    //if (chartDiv) chartDiv.innerHTML = '';
+
     // Create root element
     const root = am5.Root.new("chartdiv");
     rootRef.current = root;
@@ -258,12 +371,6 @@ const Overview: React.FC = () => {
       strokeOpacity: 0.1
     });
 
-    myTheme.rule("Container").setAll({
-      background: am5.Rectangle.new(root, {
-        fill: am5.color("#1a1a1a"),
-        fillOpacity: 0.95
-      })
-    });
 
     // Set themes
     root.setThemes([
@@ -290,17 +397,19 @@ const Overview: React.FC = () => {
       am5stock.StockPanel.new(root, {
         wheelY: "zoomX",
         panX: true,
-        panY: true
+        panY: true,
+    
       })
     );
 
+    
     // Create value axis
     const valueAxis = mainPanel.yAxes.push(
       am5xy.ValueAxis.new(root, {
         renderer: am5xy.AxisRendererY.new(root, {
           pan: "zoom"
         }),
-        extraMin: 0.1,
+
         tooltip: am5.Tooltip.new(root, {}),
         numberFormat: "#,###.00",
         extraTooltipPrecision: 2
@@ -311,82 +420,86 @@ const Overview: React.FC = () => {
     const dateAxis = mainPanel.xAxes.push(
       am5xy.GaplessDateAxis.new(root, {
         baseInterval: {
-          timeUnit: "minute",
-          count: 1
+          timeUnit: timeInterval.timeUnit,
+          count: timeInterval.count
         },
         renderer: am5xy.AxisRendererX.new(root, {
           minorGridEnabled: true
         }),
-        tooltip: am5.Tooltip.new(root, {})
+        tooltip: am5.Tooltip.new(root, {}),
+     
+      })
+    );
+    
+    // Scroll ve zoom olaylarında yeni veri çekme kodunu kaldırdım
+    // Artık sadece ilk yüklemede 1000 veri çekilecek ve zoom/pan ile yeni veri çekilmeyecek
+
+    // Create series
+    const valueSeries = mainPanel.series.push(
+      am5xy.CandlestickSeries.new(root, {
+        name: selectedArac || "Seçili Cihaz",
+        clustered: false,
+        valueXField: "timestamp",
+        valueYField: "close",
+        highValueYField: "high",
+        lowValueYField: "low",
+        openValueYField: "open",
+        calculateAggregates: true,
+        xAxis: dateAxis,
+        yAxis: valueAxis,
+        legendValueText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/] [fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/] [fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/] [fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]",
+        tooltip: am5.Tooltip.new(root, {
+          pointerOrientation: "horizontal",
+          labelText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/]\n[fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/]\n[fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/]\n[fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]"
+        })
       })
     );
 
-       // Create series
-       const valueSeries = mainPanel.series.push(
-        am5xy.CandlestickSeries.new(root, {
-          name: "GES-1",
-          clustered: false,
-          valueXField: "timestamp",
-          valueYField: "close",
-          highValueYField: "high",
-          lowValueYField: "low",
-          openValueYField: "open",
-          calculateAggregates: true,
-          xAxis: dateAxis,
-          yAxis: valueAxis,
-          legendValueText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/] [fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/] [fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/] [fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]",
-          tooltip: am5.Tooltip.new(root, {
-            pointerOrientation: "horizontal",
-            labelText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/]\n[fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/]\n[fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/]\n[fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]"
-          })
+    // Set main value series
+    stockChart.set("stockSeries", valueSeries);
+
+    // Add legend
+    const valueLegend = mainPanel.plotContainer.children.push(
+      am5stock.StockLegend.new(root, {
+        stockChart: stockChart,
+        layout: root.horizontalLayout,
+        x: am5.p50,
+        centerX: am5.p50,
+        y: 0,
+        centerY: am5.p0,
+        background: am5.Rectangle.new(root, {
+          fill: am5.color("#ffffff"),
+          fillOpacity: 0.8
         })
-      );
-  
-      // Set main value series
-      stockChart.set("stockSeries", valueSeries);
-  
-      // Add legend
-      const valueLegend = mainPanel.plotContainer.children.push(
-        am5stock.StockLegend.new(root, {
-          stockChart: stockChart,
-          layout: root.horizontalLayout,
-          x: am5.p50,
-          centerX: am5.p50,
-          y: 0,
-          centerY: am5.p0,
-          background: am5.Rectangle.new(root, {
-            fill: am5.color("#ffffff"),
-            fillOpacity: 0.8
-          })
-        })
-      );
-  
-      // Style legend labels
-      valueLegend.labels.template.setAll({
-        fill: am5.color("#666666"),
-        fontSize: "12px"
-      });
-  
-      valueLegend.markers.template.setAll({
-        width: 20,
-        height: 20
-      });
-  
-      // Create volume axis
-      const volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
-      volumeAxisRenderer.labels.template.set("forceHidden", true);
-      volumeAxisRenderer.grid.template.set("forceHidden", true);
-  
-      const volumeValueAxis = mainPanel.yAxes.push(
-        am5xy.ValueAxis.new(root, {
-          numberFormat: "#.#a",
-          height: am5.percent(20),
-          y: am5.percent(100),
-          centerY: am5.percent(100),
-          renderer: volumeAxisRenderer
-        })
-      );
-  
+      })
+    );
+
+    // Style legend labels
+    valueLegend.labels.template.setAll({
+      fill: am5.color("#666666"),
+      fontSize: "12px"
+    });
+
+    valueLegend.markers.template.setAll({
+      width: 20,
+      height: 20
+    });
+
+    // Create volume axis
+    const volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
+    volumeAxisRenderer.labels.template.set("forceHidden", true);
+    volumeAxisRenderer.grid.template.set("forceHidden", true);
+
+    const volumeValueAxis = mainPanel.yAxes.push(
+      am5xy.ValueAxis.new(root, {
+        numberFormat: "#.#a",
+        height: am5.percent(20),
+        y: am5.percent(100),
+        centerY: am5.percent(100),
+        renderer: volumeAxisRenderer
+      })
+    );
+
     // Add volume series
     const volumeSeries = mainPanel.series.push(
       am5xy.ColumnSeries.new(root, {
@@ -414,7 +527,6 @@ const Overview: React.FC = () => {
         const close = dataItem.get("close" as any);
         const open = dataItem.get("open" as any);
         if (typeof close === 'number' && typeof open === 'number') {
-          // Yükseliş için açık mavi, düşüş için koyu mor
           return close >= open ? am5.color("#43e0ff") : am5.color("#6a11cb");
         }
       }
@@ -430,7 +542,8 @@ const Overview: React.FC = () => {
       yAxis: valueAxis,
       xAxis: dateAxis,
       snapToSeries: [valueSeries],
-      snapToSeriesBy: "y!"
+      snapToSeriesBy: "y!",
+      behavior: "zoomX"
     }));
 
     // Add scrollbar
@@ -571,15 +684,6 @@ const Overview: React.FC = () => {
       }
     });
 
-    // Generate random data
-    const data = generateData();
-    valueSeries.data.setAll(data);
-    volumeSeries.data.setAll(data);
-    sbSeries.data.setAll(data);
-
-    // Add initial comparison
-    addComparingSeries("GES-2");
-
     // Add toolbar
     const container = document.getElementById("chartcontrols");
     if (container) {
@@ -589,14 +693,7 @@ const Overview: React.FC = () => {
         controls: [
           mainSeriesControl,
           comparisonControl,
-          am5stock.IndicatorControl.new(root, {
-            stockChart: stockChart,
-            legend: valueLegend
-          }),
           am5stock.DateRangeSelector.new(root, {
-            stockChart: stockChart
-          }),
-          am5stock.PeriodSelector.new(root, {
             stockChart: stockChart
           }),
           am5stock.SeriesTypeControl.new(root, {
@@ -613,60 +710,92 @@ const Overview: React.FC = () => {
           })
         ]
       });
+      // Custom zaman aralığı buton grubu
+      const oldDiv = document.getElementById('custom-time-interval-group');
+      if (oldDiv) oldDiv.remove();
+      const timeIntervalDiv = document.createElement('div');
+      timeIntervalDiv.id = 'custom-time-interval-group';
+      timeIntervalDiv.style.display = 'flex';
+      timeIntervalDiv.style.gap = '4px';
+      timeIntervalDiv.style.marginLeft = '12px';
+      const intervals = [
+        { label: "1Dk", value: { timeUnit: "minute", count: 1 } },
+        { label: "15Dk", value: { timeUnit: "minute", count: 15 } },
+        { label: "1Saat", value: { timeUnit: "hour", count: 1 } },
+        { label: "3Saat", value: { timeUnit: "hour", count: 3 } }
+      ];
+      intervals.forEach((item) => {
+        const btn = document.createElement("button");
+        btn.innerText = item.label;
+        btn.className = "am5stock-control am5stock-control-button";
+        btn.style.cursor = "pointer";
+        btn.style.background = (timeInterval.timeUnit === item.value.timeUnit && timeInterval.count === item.value.count) ? "#e6e6e6" : "#fff";
+        btn.onclick = () => {
+          setTimeInterval(item.value as { timeUnit: "minute" | "hour"; count: number });
+        };
+        timeIntervalDiv.appendChild(btn);
+      });
+      container.appendChild(timeIntervalDiv);
     }
-
-    // Add CSS for toolbar
-    const style = document.createElement('style');
-    style.textContent = `
-      .am5stock-control, .am5stock-control-button {
-        color: #333333 !important;
-        background-color: #f5f5f5 !important;
-        border: 1px solid #e0e0e0 !important;
-        border-radius: 4px !important;
-        margin: 0 4px !important;
-        padding: 6px 12px !important;
-      }
-      .am5stock-control:hover, .am5stock-control-button:hover {
-        background-color: #e8e8e8 !important;
-      }
-      .am5stock-list-item {
-        color: #333333 !important;
-        background-color: #ffffff !important;
-        padding: 8px 12px !important;
-      }
-      .am5stock-list-item:hover {
-        background-color: #f5f5f5 !important;
-      }
-      #chartcontrols {
-        height: auto;
-        padding: 5px 5px 0 16px;
-        max-width: 100%;
-        background-color: #ffffff;
-        border-bottom: 1px solid #e0e0e0;
-      }
-      .am5stock-control-group {
-        margin: 0 !important;
-        padding: 4px 0 !important;
-      }
-      .am5stock-list {
-        background-color: #ffffff !important;
-        border: 1px solid #e0e0e0 !important;
-        border-radius: 4px !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-      }
-      .am5stock-list-info {
-        color: #666666 !important;
-      }
-    `;
-    document.head.appendChild(style);
 
     // Save references
     chartRef.current = stockChart;
 
+    // Initialize with empty data
+    valueSeries.data.setAll([]);
+    volumeSeries.data.setAll([]);
+    sbSeries.data.setAll([]);
+
+    // Period selector'ı ayarla
+    const periodSelector = stockChart.get("periodSelector");
+    if (periodSelector) {
+      periodSelector.on("selected", (ev) => {
+        if (ev.item) {
+          handlePeriodChange(ev.item);
+        }
+      });
+    }
+
+    // Cleanup
     return () => {
-      root.dispose();
+      if (periodSelector) {
+        periodSelector.off("selected");
+      }
+      if (rootRef.current) {
+        rootRef.current.dispose();
+      }
     };
-  }, []);
+  }, [selectedArac, handlePeriodChange]);
+
+  
+  // Separate effect for updating chart data
+  useEffect(() => {
+    let isMounted = true;
+    const chart = chartRef.current;
+    try {
+      if (
+        chart &&
+        candlestickData.length > 0 &&
+        rootRef.current &&
+        typeof chart.get === 'function' &&
+        !(typeof chart.isDisposed === 'function' && chart.isDisposed())
+      ) {
+        const valueSeries = chart.get('stockSeries');
+        const volumeSeries = chart.get('volumeSeries');
+        
+        // Veri güncellemelerini güvenli bir şekilde yap
+        if (valueSeries && isMounted) {
+          valueSeries.data.setAll(candlestickData);
+        }
+        if (volumeSeries && isMounted) {
+          volumeSeries.data.setAll(candlestickData);
+        }
+      }
+    } catch (err) {
+      console.error('Chart update error (possibly disposed):', err);
+    }
+    return () => { isMounted = false; };
+  }, [candlestickData]);
 
   console.log('Overview render');
 
@@ -710,7 +839,10 @@ const Overview: React.FC = () => {
 
         <select 
           value={selectedVariable} 
-          onChange={(e) => setSelectedVariable(e.target.value)}
+          onChange={(e) => {
+            setSelectedVariable(e.target.value);
+            setDataBuffer([]);
+          }}
           className="select-box"
           disabled={!selectedArac || !Array.isArray(availableVariables) || availableVariables.length === 0}
         >
