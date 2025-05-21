@@ -129,4 +129,20 @@
   background-color: #2a2a2a;
   border-radius: 8px;
   overflow: hidden;
+}
+
+/* amCharts scrollbar cursor fix */
+.am5xy-scrollbar, .am5xy-scrollbar .am5xy-scrollbar-thumb {
+  cursor: grab !important;
+}
+.am5xy-scrollbar .am5xy-scrollbar-thumb:active {
+  cursor: grabbing !important;
+}
+
+/* amCharts DateRangeSelector cursor fix */
+.am5stock-daterange-selector,
+.am5stock-daterange-selector *,
+.am5stock-daterange-selector input,
+.am5stock-daterange-selector button {
+  cursor: pointer !important;
 } 

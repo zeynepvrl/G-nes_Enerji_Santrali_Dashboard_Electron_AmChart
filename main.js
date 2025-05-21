@@ -119,73 +119,147 @@ function setupDatabase() {
 
 
 // Tablo isimlerini veya son kayıtları getiren IPC handler
-ipcMain.handle('get-tables', async (event, dbName, tableName, limit, startDate, endDate) => {
-  const tempPool = new Pool({
-    user: 'zeynep',
-    host: '10.10.30.31',
+ipcMain.handle('get-tables', async (event, dbName, tableName, limit, startTime, endTime) => {
+  // Veritabanı bağlantı bilgilerini config'den al
+  const dbConfig = {
+    user: process.env.DB_USER || 'zeynep',
+    host: process.env.DB_HOST || '10.10.30.31',
     database: dbName,
-    password: 'zeynep421',
-    port: 5432,
-  });
+    password: process.env.DB_PASSWORD || 'zeynep421',
+    port: parseInt(process.env.DB_PORT || '5432'),
+  };
 
+  let tempPool;
   try {
+    // Table name validation
+    if (!tableName || !/^[a-zA-Z0-9_]+$/.test(tableName)) {
+      throw new Error('Invalid table name');
+    }
+
+    tempPool = new Pool(dbConfig);
+
+    // Build query safely
     let query = `
       SELECT *
       FROM "${tableName}"
     `;
     const params = [];
+    let whereClauses = [];
 
-    // Tarih aralığı varsa ekle
-    if (startDate && endDate) {
-      query += ` WHERE timestamp BETWEEN $1 AND $2`;
-      params.push(startDate, endDate);
+    // Add time range conditions
+    if (startTime && endTime) {
+      whereClauses.push(`timestamp BETWEEN $1 AND $2`);
+      params.push(startTime, endTime);
+    } else if (startTime) {
+      whereClauses.push(`timestamp >= $1`);
+      params.push(startTime);
+    } else if (endTime) {
+      whereClauses.push(`timestamp <= $1`);
+      params.push(endTime);
     }
 
-    query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1}`;
-    params.push(limit);
+    if (whereClauses.length > 0) {
+      query += ' WHERE ' + whereClauses.join(' AND ');
+    }
+
+    // Add ordering and limit
+    if (!startTime && !endTime) {
+      query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1}`;
+      params.push(limit || 1000);
+    } else {
+      query += ` ORDER BY timestamp ASC`;
+      if (limit) {
+        query += ` LIMIT $${params.length + 1}`;
+        params.push(limit);
+      }
+    }
+
+    console.log('Executing query:', query);
+    console.log('With params:', params);
 
     const result = await tempPool.query(query, params);
-    await tempPool.end();
-    //console.log('result:', result.rows);
-    return result.rows;
+    
+    // Veri doğrulama ve dönüştürme
+    const validatedRows = result.rows.map(row => {
+      // timestamp kontrolü
+      if (!row.timestamp) {
+        console.warn('Row missing timestamp:', row);
+        return null;
+      }
+      
+      // timestamp'i Date objesine çevir
+      const timestamp = new Date(row.timestamp);
+      if (isNaN(timestamp.getTime())) {
+        console.warn('Invalid timestamp:', row.timestamp);
+        return null;
+      }
+      
+      return {
+        ...row,
+        timestamp: timestamp
+      };
+    }).filter(row => row !== null);
+
+    return validatedRows;
+
   } catch (error) {
-    await tempPool.end();
-    throw error;
+    console.error('Database query error:', error);
+    throw new Error(`Database query failed: ${error.message}`);
+  } finally {
+    if (tempPool) {
+      try {
+        await tempPool.end();
+      } catch (error) {
+        console.error('Error closing database connection:', error);
+      }
+    }
   }
 });
 
-// Tüm veritabanları içinr
+// Tüm veritabanları için handler
 ipcMain.handle('get-all-tables', async () => {
   const pool = new Pool({
-    user: 'zeynep',
-    host: '10.10.30.31',
+    user: process.env.DB_USER || 'zeynep',
+    host: process.env.DB_HOST || '10.10.30.31',
     database: 'postgres',
-    password: 'zeynep421',
-    port: 5432,
+    password: process.env.DB_PASSWORD || 'zeynep421',
+    port: parseInt(process.env.DB_PORT || '5432'),
   });
-  const dbs = await pool.query("SELECT datname FROM pg_database WHERE datistemplate = false;");
-  const result = {};
-  for (const row of dbs.rows) {
-    const dbName = row.datname;
-    const tempPool = new Pool({
-      user: 'zeynep',
-      host: '10.10.30.31',
-      database: dbName,
-      password: 'zeynep421',
-      port: 5432,
-    });
-    try {
-      const tables = await tempPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
-      result[dbName] = tables.rows.map(r => r.table_name);
-      //console.log(result);
-    } catch (e) {
-      console.error('Veritabanı bağlantı hatası:', e);
-      result[dbName] = [];
+
+  try {
+    const dbs = await pool.query("SELECT datname FROM pg_database WHERE datistemplate = false;");
+    const result = {};
+    
+    for (const row of dbs.rows) {
+      const dbName = row.datname;
+      const tempPool = new Pool({
+        user: process.env.DB_USER || 'zeynep',
+        host: process.env.DB_HOST || '10.10.30.31',
+        database: dbName,
+        password: process.env.DB_PASSWORD || 'zeynep421',
+        port: parseInt(process.env.DB_PORT || '5432'),
+      });
+      
+      try {
+        const tables = await tempPool.query(
+          "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+        );
+        result[dbName] = tables.rows.map(r => r.table_name);
+      } catch (e) {
+        console.error(`Database connection error for ${dbName}:`, e);
+        result[dbName] = [];
+      } finally {
+        await tempPool.end();
+      }
     }
-    await tempPool.end();
+    
+    return result;
+  } catch (error) {
+    console.error('Error fetching database list:', error);
+    throw new Error(`Failed to fetch database list: ${error.message}`);
+  } finally {
+    await pool.end();
   }
-  await pool.end();
-  return result;
 });
 
 // Dinamik subscribe için IPC handler

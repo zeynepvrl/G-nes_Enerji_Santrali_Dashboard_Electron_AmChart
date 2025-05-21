@@ -14,27 +14,22 @@ type DataField = {
   aggregation: string;
   index: number;
 };
-
 type DeviceTypeConfig = {
   inverter?: DataField[];
   analizor?: DataField[];
   rtu?: DataField[];
 };
-
 type GesConfig = {
   [key: string]: DeviceTypeConfig;
 };
-
 type DeviceConfigs = {
   [key: string]: GesConfig;
 };
 
-// TypeScript için window.electronAPI global tanımı
-// Eğer global.d.ts dosyan yoksa, bu dosyanın başına ekleyebilirsin
 declare global {
   interface Window {
     electronAPI: {
-      getTablesHistory: (dbName: string, tableName?: string, limit?: number, startDate?: Date, endDate?: Date) => Promise<any[]>;
+      getTablesHistory: (dbName: string, tableName?: string, limit?: number, startTime?: Date, endTime?: Date) => Promise<any[]>;
       onMqttData: (callback: (data: string, topic?: string) => void) => void;
       getAllTables: () => Promise<{ [dbName: string]: string[] }>;
       subscribeMqtt: (topic: string) => void;
@@ -45,6 +40,7 @@ declare global {
 const Overview: React.FC = () => {
   const chartRef = useRef<am5stock.StockChart | null>(null);
   const rootRef = useRef<am5.Root | null>(null);
+  const dateAxisRef = useRef<am5xy.GaplessDateAxis<am5xy.AxisRenderer> | null>(null);
   const [selectedIl, setSelectedIl] = useState('');
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
@@ -66,19 +62,18 @@ const Overview: React.FC = () => {
     close: number;
     volume: number;
   }[]>([]);
-
-  // Yeni: Veritabanı ve tablo isimleri için state
   const [ilList, setIlList] = useState<string[]>([]);
   const [gesList, setGesList] = useState<string[]>([]);
   const [aracList, setAracList] = useState<string[]>([]);
   const [allTables, setAllTables] = useState<{ [dbName: string]: string[] }>({});
-
-  // Stringin ilk harfini büyüt
+  const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
+  const [selectionMin, setSelectionMin] = useState<number | undefined>(undefined);
+  const [selectionMax, setSelectionMax] = useState<number | undefined>(undefined);
+  
   function capitalize(str: string) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
   }
-
   // Tablo adından cihaz grubunu otomatik bul
   function getCihazGrubu(tablename: string) {
     if (!tablename) return '';
@@ -89,7 +84,6 @@ const Overview: React.FC = () => {
     if (lower === 'history') return 'history';
     return '';
   }
-
    // Get device type from table name
    function getDeviceType(tablename: string) {
     if (!tablename) return '';
@@ -99,12 +93,10 @@ const Overview: React.FC = () => {
     if (lower.startsWith('rtu')) return 'rtu';
     return '';
   }
-
   // Tüm veritabanları ve tablo isimlerini başta çek
   useEffect(() => {
     if (!window.electronAPI?.getAllTables) return;
     window.electronAPI.getAllTables().then((all) => {
-      //console.log('Tüm veritabanı ve tablo isimleri:', all);
       setAllTables(all);
       const names = Object.keys(all);
       // İl adlarını benzersiz olarak bul
@@ -131,13 +123,15 @@ const Overview: React.FC = () => {
       setSelectedGes('');
       setAracList([]);
       setSelectedArac('');
+      setSelectedVariable('');
+      setAvailableVariables([]);
     } else {
       setGesList([]);
       setSelectedGes('');
       setAracList([]);
       setSelectedArac('');
     }
-  }, [selectedIl, allTables]);
+  }, [selectedIl]);
 
   // GES seçilince tablo (araç) listesini hazırdan getir
   useEffect(() => {
@@ -149,11 +143,14 @@ const Overview: React.FC = () => {
       setAracList([]);
       setSelectedArac('');
     }
-  }, [selectedIl, selectedGes, allTables]);
+  }, [selectedGes]);
 
   // Seçim değişince veriyi sıfırla
   useEffect(() => {
+    setHasZoomedInitially(false);
     setAracVerisi(null);
+    setDataBuffer([]);
+    setCandlestickData([]);
   }, [selectedIl, selectedGes, selectedArac]);
   
   // Update available variables when device selection changes
@@ -179,147 +176,147 @@ const Overview: React.FC = () => {
       setAvailableVariables([]);
     }
     setSelectedVariable('');
-  }, [selectedIl, selectedGes, selectedArac]);
-
-
-  // Seçilen il, GES ve araç'a göre MQTT topic'ini dinle
-  useEffect(() => {
-    if (!selectedIl || !selectedGes || !selectedArac) return;
-
-    const mqttIl = capitalize(selectedIl);
-    const mqttGes = capitalize(selectedGes);
-    const cihazGrubu = getCihazGrubu(selectedArac);
-    if (!cihazGrubu) return;
-    const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
-
-    console.log('MQTT dinlenen topic:', topic);
-    window.electronAPI.subscribeMqtt(topic);
-
-    // Dinleyici fonksiyonu
-    const handler = (data: string, incomingTopic?: string) => {
-      if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
-        setAracVerisi(data);
-      }
-    };
-
-    // Dinleyiciyi ekle ve kaldırıcıyı al
-    const unsubscribe = window.electronAPI.onMqttData(handler) as any;
-
-    // Temizlik: component unmount veya seçim değişince dinleyiciyi kaldır
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();         //alt satırdakilerden birinde effevt olursa unsubscribe çalışacak
-    };
   }, [selectedArac]);
 
- 
-
-  // Seçilen değişken değiştiğinde geçmiş verileri çek ve grafiği doldur
+  // Combined effect for both historical and real-time data
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
     if (selectedArac === "" || selectedVariable === "") return;
-
+    setHasZoomedInitially(false);
+    
     const dbName = `${selectedIl}_${selectedGes}`;
     const variableConfig = availableVariables.find(v => v.name === selectedVariable);
     if (!variableConfig) return;
 
-    window.electronAPI.getTablesHistory(dbName, selectedArac, 1000)
+    // Fetch historical data
+    const endTime = new Date();
+    const startTime = new Date(endTime.getTime() - 20*60*60*1000);
+    
+    window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime)
       .then(records => {
         if (records && records.length > 0) {
-          console.log('records:', records);
+          const rawData = records
+            .map(record => {
+              const value = record[selectedVariable];
+              const numValue = Number(value);
+              const timestamp = new Date(record.timestamp).getTime();
+              return {
+                timestamp: timestamp,
+                value: numValue
+              };
+            })
+            .filter((item): item is { timestamp: number; value: number } => item !== null)
+            .sort((a, b) => a.timestamp - b.timestamp);
           
-          const rawData = records.map(record => {
-            const value = record[variableConfig.name];   
-            return {
-              timestamp: new Date(record.timestamp).getTime(),
-              value: value
-            };
-          });// yiter yiter ne bu heyecan
-          // SIRALAMA: Eski -> Yeni
-          rawData.sort((a, b) => a.timestamp - b.timestamp);
-          setDataBuffer(rawData); // Sadece buffer'ı güncelle
+          setDataBuffer(rawData);
         }
       })
       .catch(error => {
         console.error('Geçmiş veriler çekilirken hata:', error);
       });
-  }, [selectedVariable]);
 
-  // Parse MQTT data and get selected variable value
-  const selectedValue = useMemo(() => {
-    if (!aracVerisi || !selectedVariable) return null;
-    try {
-      const data = JSON.parse(aracVerisi);
-      if (!Array.isArray(data)) return null;
-      const variableConfig = Array.isArray(availableVariables)
-        ? availableVariables.find(v => v.name === selectedVariable)
-        : undefined;
-      if (!variableConfig) return null;
-      const variableIndex = variableConfig.index;
-      if (variableIndex === undefined) return null;
-      const value = data[variableIndex + 1];
-      if (value === undefined) return null;
+    // Handle MQTT data
+    const handleMqttData = (data: string) => {
+      try {
+        const parsedData = JSON.parse(data);
+        if (!Array.isArray(parsedData)) return;
+        
+        const variableIndex = variableConfig.index;
+        if (variableIndex === undefined) return;
+        
+        const value = parsedData[variableIndex + 1];
+        if (value === undefined) return;
 
-      console.log('MQTT gelen verinin timestampi:', data[0]);
-      // Add new data point to buffer
-      const newDataPoint = {
-        timestamp: new Date(data[0]).getTime(),
-        value: value
-      };
-      
-      
-      // Update buffer using functional update to avoid stale closures
-      setDataBuffer(prev => {
-        const newBuffer = [...prev, newDataPoint];
-        return newBuffer;
+        const newDataPoint = {
+          timestamp: new Date(parsedData[0]).getTime(),
+          value: value
+        };
+
+        setDataBuffer(prev => [...prev, newDataPoint]);
+        setAracVerisi(value.toString()); // Update the current value display
+      } catch (error) {
+        console.error('Error parsing MQTT data:', error);
+      }
+    };
+
+    // Subscribe to MQTT updates
+    const mqttIl = capitalize(selectedIl);
+    const mqttGes = capitalize(selectedGes);
+    const cihazGrubu = getCihazGrubu(selectedArac);
+    if (cihazGrubu) {
+      const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
+      window.electronAPI.subscribeMqtt(topic);
+      const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
+        if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
+          handleMqttData(data);
+        }
       });
 
-      console.log('MQTT  data buffer şu an ', dataBuffer);
-
-      return value;
-    } catch (error) {
-      console.error('Error parsing MQTT data:', error);
-      return null;
+      return () => {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      };
     }
-  }, [aracVerisi, selectedVariable]);
-  
-
+  }, [selectedVariable]);
   // Zaman aralığı veya dataBuffer değiştiğinde sadece gruplama yap
   useEffect(() => {
-    if (dataBuffer.length === 0) return;
+    if (!dataBuffer || dataBuffer.length === 0) {
+      console.log('DataBuffer is empty');
+      return;
+    }
+
     // Zaman aralığına göre timestamp'i yuvarla
     const getRoundedTimestamp = (timestamp: number) => {
       const { timeUnit, count } = timeInterval;
       const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
       return Math.floor(timestamp / ms) * ms;
     };
+
     // Seçilen zaman aralığına göre gruplama
     const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
+    
     dataBuffer.forEach(d => {
       const roundedTime = getRoundedTimestamp(d.timestamp);
       if (!grouped.has(roundedTime)) {
         grouped.set(roundedTime, { values: [], timestamps: [] });
       }
-      grouped.get(roundedTime)!.values.push(d.value);
-      grouped.get(roundedTime)!.timestamps.push(d.timestamp);
+      const group = grouped.get(roundedTime)!;
+      group.values.push(d.value);
+      group.timestamps.push(d.timestamp);
     });
+
     // Her zaman aralığı için bir mum oluştur
-    const newCandles = Array.from(grouped.entries()).map(([time, group]) => {
-      const values = group.values;
-      return {
-        timestamp: time,
-        open: values[0],
-        high: Math.max(...values),
-        low: Math.min(...values),
-        close: values[values.length - 1],
-        volume: values.length
-      };
-    });
+    const newCandles = Array.from(grouped.entries())
+      .filter(([_, group]) => group.values.length > 0) // Boş grupları filtrele
+      .sort(([timeA], [timeB]) => timeA - timeB)
+      .map(([time, group]) => {
+        const values = group.values;
+        if (values.length === 0) return null;
+        
+        const open = values[0];
+        const close = values[values.length - 1];
+        const high = Math.max(...values);
+        const low = Math.min(...values);
+        
+        // NaN kontrolü
+        if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
+          console.log('Invalid candle values:', { time, open, close, high, low });
+          return null;
+        }
+        
+        return {
+          timestamp: time,
+          open,
+          high,
+          low,
+          close,
+          volume: values.length
+        };
+      })
+      .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
     
+
     setCandlestickData(newCandles);
-    console.log('candles:', newCandles);
   }, [dataBuffer, timeInterval]);
-
-
   // Period değişikliğini yöneten fonksiyon
   const handlePeriodChange = useCallback((newInterval: { timeUnit: "minute" | "hour", count: number }) => {
     setTimeInterval(newInterval);
@@ -328,23 +325,15 @@ const Overview: React.FC = () => {
   // Ana effect - selectedArac değişikliğini dinler
   useEffect(() => {
     if (!selectedArac) return;
-
-    // Grafik oluşturulmadan önce DOM'u temizle
-    const chartDiv = document.getElementById('chartdiv');
-    //if (chartDiv) chartDiv.innerHTML = '';
-
     // Create root element
     const root = am5.Root.new("chartdiv");
     rootRef.current = root;
-
     // Create custom theme
     const myTheme = am5.Theme.new(root);
-    
     // Dark theme settings
     myTheme.rule("Grid", ["scrollbar", "minor"]).setAll({
       visible: false
     });
-
     myTheme.rule("ColorSet").setAll({
       colors: [
         am5.color("#a259ff"), // Açık mor
@@ -354,30 +343,24 @@ const Overview: React.FC = () => {
         am5.color("#ffe082"), // Sarı (vurgulu)
       ]
     });
-
     // Text and UI element colors
     myTheme.rule("Label").setAll({
       fill: am5.color("#ffffff"),
       fontSize: "0.9em"
     });
-
     myTheme.rule("AxisRenderer").setAll({
       stroke: am5.color("#ffffff"),
       strokeOpacity: 0.6
     });
-
     myTheme.rule("Grid").setAll({
       stroke: am5.color("#ffffff"),
       strokeOpacity: 0.1
     });
-
-
     // Set themes
     root.setThemes([
       am5themes_Animated.new(root),
       myTheme
     ]);
-
     // Create stock chart
     const stockChart = root.container.children.push(
       am5stock.StockChart.new(root, {
@@ -398,25 +381,9 @@ const Overview: React.FC = () => {
         wheelY: "zoomX",
         panX: true,
         panY: true,
-    
       })
     );
 
-    
-    // Create value axis
-    const valueAxis = mainPanel.yAxes.push(
-      am5xy.ValueAxis.new(root, {
-        renderer: am5xy.AxisRendererY.new(root, {
-          pan: "zoom"
-        }),
-
-        tooltip: am5.Tooltip.new(root, {}),
-        numberFormat: "#,###.00",
-        extraTooltipPrecision: 2
-      })
-    );
-
-    // Create date axis
     const dateAxis = mainPanel.xAxes.push(
       am5xy.GaplessDateAxis.new(root, {
         baseInterval: {
@@ -427,13 +394,32 @@ const Overview: React.FC = () => {
           minorGridEnabled: true
         }),
         tooltip: am5.Tooltip.new(root, {}),
-     
+        maxZoomCount: 200,
+      })
+    );
+    dateAxis.onPrivate("selectionMin",function(value,target){
+      setSelectionMin(value);
+      console.log("selectionMin",value);
+    });
+    dateAxis.onPrivate("selectionMax",function(value,target){
+      setSelectionMax(value);
+      console.log("selectionMax",value);
+    });
+    dateAxisRef.current = dateAxis;
+
+    // Create value axis
+    const valueAxis = mainPanel.yAxes.push(
+      am5xy.ValueAxis.new(root, {
+        renderer: am5xy.AxisRendererY.new(root, {
+          pan: "zoom"
+        }),
+        extraMin:0.1,
+        tooltip: am5.Tooltip.new(root, {}),
+        numberFormat: "#,###.00",
+        extraTooltipPrecision: 2
       })
     );
     
-    // Scroll ve zoom olaylarında yeni veri çekme kodunu kaldırdım
-    // Artık sadece ilk yüklemede 1000 veri çekilecek ve zoom/pan ile yeni veri çekilmeyecek
-
     // Create series
     const valueSeries = mainPanel.series.push(
       am5xy.CandlestickSeries.new(root, {
@@ -499,7 +485,6 @@ const Overview: React.FC = () => {
         renderer: volumeAxisRenderer
       })
     );
-
     // Add volume series
     const volumeSeries = mainPanel.series.push(
       am5xy.ColumnSeries.new(root, {
@@ -514,12 +499,10 @@ const Overview: React.FC = () => {
         stroke: am5.color("#6a11cb")
       })
     );
-
     volumeSeries.columns.template.setAll({
       strokeOpacity: 0,
       fillOpacity: 0.5
     });
-
     // Color columns by stock rules
     volumeSeries.columns.template.adapters.add("fill", function(fill, target) {
       const dataItem = target.dataItem;
@@ -536,25 +519,22 @@ const Overview: React.FC = () => {
     // Set main series
     stockChart.set("volumeSeries", volumeSeries);
     valueLegend.data.setAll([valueSeries, volumeSeries]);
-
     // Add cursor
     mainPanel.set("cursor", am5xy.XYCursor.new(root, {
       yAxis: valueAxis,
       xAxis: dateAxis,
       snapToSeries: [valueSeries],
       snapToSeriesBy: "y!",
-      behavior: "zoomX"
-    }));
 
+    }));
     // Add scrollbar
-    const scrollbar = mainPanel.set("scrollbarX",
+    /* const scrollbar = mainPanel.set("scrollbarX",
       am5xy.XYChartScrollbar.new(root, {
         orientation: "horizontal",
         height: 50
       })
     );
     stockChart.toolsContainer.children.push(scrollbar);
-
     const sbDateAxis = scrollbar.chart.xAxes.push(
       am5xy.GaplessDateAxis.new(root, {
         baseInterval: {
@@ -566,13 +546,11 @@ const Overview: React.FC = () => {
         })
       })
     );
-
     const sbValueAxis = scrollbar.chart.yAxes.push(
       am5xy.ValueAxis.new(root, {
         renderer: am5xy.AxisRendererY.new(root, {})
       })
     );
-
     const sbSeries = scrollbar.chart.series.push(
       am5xy.LineSeries.new(root, {
         valueYField: "close",
@@ -581,12 +559,10 @@ const Overview: React.FC = () => {
         yAxis: sbValueAxis
       })
     );
-
     sbSeries.fills.template.setAll({
       visible: true,
       fillOpacity: 0.3
-    });
-
+    }); */
     // Function to get available santrals
     function getSantralList(search: string) {
       if (search === "") {
@@ -606,7 +582,6 @@ const Overview: React.FC = () => {
                item.subLabel.toLowerCase().includes(search);
       });
     }
-
     // Function to add comparing series
     function addComparingSeries(label: string) {
       const series = am5xy.LineSeries.new(root, {
@@ -744,30 +719,165 @@ const Overview: React.FC = () => {
     // Initialize with empty data
     valueSeries.data.setAll([]);
     volumeSeries.data.setAll([]);
-    sbSeries.data.setAll([]);
+    //sbSeries.data.setAll([]);
 
-    // Period selector'ı ayarla
-    const periodSelector = stockChart.get("periodSelector");
-    if (periodSelector) {
-      periodSelector.on("selected", (ev) => {
-        if (ev.item) {
-          handlePeriodChange(ev.item);
-        }
-      });
-    }
 
     // Cleanup
     return () => {
-      if (periodSelector) {
-        periodSelector.off("selected");
-      }
+      
       if (rootRef.current) {
         rootRef.current.dispose();
       }
     };
-  }, [selectedArac, handlePeriodChange]);
-
   
+  }, [selectedVariable, handlePeriodChange]);
+
+  // Pan event handler için ayrı bir effect
+  useEffect(() => {
+    if (!dateAxisRef.current) return;
+      // Erken validasyon kontrolleri
+      if (!selectedVariable || !selectedIl || !selectedGes || !selectedArac) {
+        console.log('Missing required selections:', { selectedVariable, selectedIl, selectedGes, selectedArac });
+        return;
+      }
+      if (dataBuffer.length === 0) {
+        console.log('Data buffer is empty, cannot process pan event');
+        return;
+      }   
+      // Geçersiz seçim kontrolü
+      if (selectionMin === undefined || selectionMax === undefined || 
+          isNaN(selectionMin) || isNaN(selectionMax)) {
+        console.log('Invalid selection values:', { selectionMin, selectionMax });
+        return;
+      }
+      console.log('Görünen range:', {
+        min: new Date(selectionMin).toLocaleString(),
+        max: new Date(selectionMax).toLocaleString()
+      });
+      try {
+        const start = new Date(selectionMin);
+        const end = new Date(selectionMax);
+        const now = new Date();
+        // Tarih kontrolü
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+          console.log('Invalid date values:', { start, end });
+          return;
+        }    
+        if (start > now) {
+          console.log('Start date is in future:', start.toLocaleString());
+          return;
+        }
+        const dbName = `${selectedIl}_${selectedGes}`;
+        console.log('Current state:', {
+          dataBufferLength: dataBuffer.length,
+          dataBufferFirst: dataBuffer[0],
+          dataBufferLast: dataBuffer[dataBuffer.length - 1],
+          selectedVariable,
+          dbName
+        });
+        // Buffer'daki verilerin gerçek zaman aralığını bul
+        const timestamps = dataBuffer.map(d => d.timestamp);
+        const bufferStart = timestamps.length > 0 ? Math.min(...timestamps) : 0;
+        const bufferEnd = timestamps.length > 0 ? Math.max(...timestamps) : 0;
+        console.log('Current buffer state:', {
+          bufferSize: timestamps.length,
+          bufferRange: timestamps.length > 0 ? {
+            start: new Date(bufferStart).toLocaleString(),
+            end: new Date(bufferEnd).toLocaleString()
+          } : 'Buffer is empty',
+          selectionStart: start.toLocaleString()
+        });
+
+        // Son 200 mum kaldığında yeni veri çek
+        const remainingCandles = timestamps.filter(t => t <= start.getTime()).length;
+        //console.log('Remaining candles:', remainingCandles);
+        if (remainingCandles <= 3000 && timestamps.length > 0) {
+          const timeToFetch = 10 * 60 * 60 * 1000; // 10 saat (milisaniye cinsinden)
+          const newStartTime = new Date(bufferStart - timeToFetch);
+          
+          /* console.log('Fetching more historical data:', {
+            fetchStart: newStartTime.toLocaleString(),
+            fetchEnd: new Date(bufferStart).toLocaleString(),
+            timeSpan: `${timeToFetch / (60 * 60 * 1000)} hours`
+          }); */
+
+          window.electronAPI.getTablesHistory(
+            dbName,
+            selectedArac,
+            undefined,
+            newStartTime,
+            new Date(bufferStart)
+          ).then(fetchedRecords => {
+            /* console.log('Fetched historical records:', {
+              count: fetchedRecords?.length || 0,
+              firstRecord: fetchedRecords?.[0],
+              lastRecord: fetchedRecords?.[fetchedRecords.length - 1]
+            }); */
+
+            if (fetchedRecords && fetchedRecords.length > 0) {
+              const newData = fetchedRecords
+                .map(record => {
+                  const value = record[selectedVariable];
+                  const numValue = Number(value);
+                  const timestamp = new Date(record.timestamp).getTime();
+                  return {
+                    timestamp: timestamp,
+                    value: numValue
+                  };
+                })
+                .filter((item): item is { timestamp: number; value: number } => 
+                  item !== null && !isNaN(item.value)
+                )
+                .sort((a, b) => a.timestamp - b.timestamp);
+
+              /* console.log('Processed new data:', {
+                count: newData.length,
+                timeRange: {
+                  start: new Date(newData[0]?.timestamp).toLocaleString(),
+                  end: new Date(newData[newData.length - 1]?.timestamp).toLocaleString()
+                }
+              }); */
+
+              /// Yeni verileri buffer'a ekle
+              setDataBuffer(prev => {
+                const combinedData = [...newData, ...prev];
+                // Timestamp'e göre sırala ve tekrar eden verileri kaldır
+                const uniqueData = Array.from(
+                  new Map(combinedData.map(item => [item.timestamp, item])).values()
+                ).sort((a, b) => a.timestamp - b.timestamp);
+
+                /* console.log('Updated historical buffer:', {
+                  previousSize: prev.length,
+                  newDataSize: newData.length,
+                  finalSize: uniqueData.length,
+                  timeRange: {
+                    start: new Date(uniqueData[0]?.timestamp).toLocaleString(),
+                    end: new Date(uniqueData[uniqueData.length - 1]?.timestamp).toLocaleString()
+                  }
+                }); */
+
+                return uniqueData;
+              }); 
+            } else {
+              console.log('No new records fetched');
+            }
+          }).catch(err => {
+            console.error('Error fetching historical data:', err);
+          });
+        } else {
+          /* console.log('No need to fetch more data:', {
+            reason: start.getTime() >= bufferStart ? 'Selection start is after buffer start' : 'Buffer is empty',
+            selectionStart: start.toLocaleString(),
+            bufferStart: new Date(bufferStart).toLocaleString()
+          }); */
+        }
+      } catch (error) {
+        console.error("Error in pan event handler:", error);
+      }
+    
+
+  }, [selectionMin,selectionMax]);
+
   // Separate effect for updating chart data
   useEffect(() => {
     let isMounted = true;
@@ -782,14 +892,26 @@ const Overview: React.FC = () => {
       ) {
         const valueSeries = chart.get('stockSeries');
         const volumeSeries = chart.get('volumeSeries');
+        if (valueSeries && volumeSeries) {
+          valueSeries.data.setAll(candlestickData);    //// SORUN BURDA BUFFER HER GEÇMİŞ VERİ GELDİĞİNDE BURASI TETİKLENDİĞİ İÇİN YENİ CANDLARA YANİ GEÇMİŞ İÇİN OLUŞTURULANLARA KAYIYOR ORAYA KAYINCA DA YENİDEN GEÇMİŞ ÇEKİYOR ,
+
+          //volumeSeries.data.setAll(candlestickData);
         
-        // Veri güncellemelerini güvenli bir şekilde yap
-        if (valueSeries && isMounted) {
-          valueSeries.data.setAll(candlestickData);
-        }
-        if (volumeSeries && isMounted) {
-          volumeSeries.data.setAll(candlestickData);
-        }
+          // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
+          if (!hasZoomedInitially && candlestickData.length > 199) {
+            valueSeries.events.once("datavalidated", function() {
+              if (dateAxisRef.current) {
+                const startIndex = Math.max(0, candlestickData.length - 200);
+                const start = candlestickData[startIndex]?.timestamp;
+                const end = candlestickData[candlestickData.length - 1]?.timestamp;
+                if (start && end) {
+                  dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+                  setHasZoomedInitially(true);
+                }
+              }
+            });
+          }
+        } 
       }
     } catch (err) {
       console.error('Chart update error (possibly disposed):', err);
@@ -852,9 +974,9 @@ const Overview: React.FC = () => {
           ))}
         </select>
 
-        {selectedValue !== null && selectedVariable && (
+        {aracVerisi !== null && selectedVariable && (
           <div className="selected-value">
-            Değer: {selectedValue}
+            Değer: {aracVerisi}
           </div>
         )}
       </div>
