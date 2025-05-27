@@ -54,6 +54,8 @@ const Overview: React.FC = () => {
 
   // Veri buffer'ları için state'ler
   const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
+  const [historicalDataBuffer, setHistoricalDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
+ 
   const [candlestickData, setCandlestickData] = useState<{
     timestamp: number;
     open: number;
@@ -62,14 +64,14 @@ const Overview: React.FC = () => {
     close: number;
     volume: number;
   }[]>([]);
+
   const [ilList, setIlList] = useState<string[]>([]);
   const [gesList, setGesList] = useState<string[]>([]);
   const [aracList, setAracList] = useState<string[]>([]);
   const [allTables, setAllTables] = useState<{ [dbName: string]: string[] }>({});
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
-  const [selectionMin, setSelectionMin] = useState<number | undefined>(undefined);
-  const [selectionMax, setSelectionMax] = useState<number | undefined>(undefined);
-  
+  const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
+
   function capitalize(str: string) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -178,7 +180,7 @@ const Overview: React.FC = () => {
     setSelectedVariable('');
   }, [selectedArac]);
 
-  // Combined effect for both historical and real-time data
+  // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
     if (selectedArac === "" || selectedVariable === "") return;
@@ -257,7 +259,7 @@ const Overview: React.FC = () => {
       };
     }
   }, [selectedVariable]);
-  // Zaman aralığı veya dataBuffer değiştiğinde sadece gruplama yap
+  // yukardak gelen DataBufferın mumları oluşturulur setCandlestickData
   useEffect(() => {
     if (!dataBuffer || dataBuffer.length === 0) {
       console.log('DataBuffer is empty');
@@ -286,7 +288,7 @@ const Overview: React.FC = () => {
 
     // Her zaman aralığı için bir mum oluştur
     const newCandles = Array.from(grouped.entries())
-      .filter(([_, group]) => group.values.length > 0) // Boş grupları filtrele
+      .filter(([_, group]) => group.values.length > 0)
       .sort(([timeA], [timeB]) => timeA - timeB)
       .map(([time, group]) => {
         const values = group.values;
@@ -297,7 +299,6 @@ const Overview: React.FC = () => {
         const high = Math.max(...values);
         const low = Math.min(...values);
         
-        // NaN kontrolü
         if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
           console.log('Invalid candle values:', { time, open, close, high, low });
           return null;
@@ -313,18 +314,18 @@ const Overview: React.FC = () => {
         };
       })
       .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-    
 
     setCandlestickData(newCandles);
   }, [dataBuffer, timeInterval]);
+
   // Period değişikliğini yöneten fonksiyon
   const handlePeriodChange = useCallback((newInterval: { timeUnit: "minute" | "hour", count: number }) => {
     setTimeInterval(newInterval);
   }, []);
 
-  // Ana effect - selectedArac değişikliğini dinler
+  // Ana effect - selectedVariable değişikliğini dinler
   useEffect(() => {
-    if (!selectedArac) return;
+    if (!selectedVariable) return;
     // Create root element
     const root = am5.Root.new("chartdiv");
     rootRef.current = root;
@@ -383,7 +384,7 @@ const Overview: React.FC = () => {
         panY: true,
       })
     );
-
+    console.log("çok mu çağırıyor effecti")
     const dateAxis = mainPanel.xAxes.push(
       am5xy.GaplessDateAxis.new(root, {
         baseInterval: {
@@ -397,14 +398,7 @@ const Overview: React.FC = () => {
         maxZoomCount: 200,
       })
     );
-    dateAxis.onPrivate("selectionMin",function(value,target){
-      setSelectionMin(value);
-      console.log("selectionMin",value);
-    });
-    dateAxis.onPrivate("selectionMax",function(value,target){
-      setSelectionMax(value);
-      console.log("selectionMax",value);
-    });
+    
     dateAxisRef.current = dateAxis;
 
     // Create value axis
@@ -519,6 +513,7 @@ const Overview: React.FC = () => {
     // Set main series
     stockChart.set("volumeSeries", volumeSeries);
     valueLegend.data.setAll([valueSeries, volumeSeries]);
+ 
     // Add cursor
     mainPanel.set("cursor", am5xy.XYCursor.new(root, {
       yAxis: valueAxis,
@@ -718,7 +713,7 @@ const Overview: React.FC = () => {
 
     // Initialize with empty data
     valueSeries.data.setAll([]);
-    volumeSeries.data.setAll([]);
+    //volumeSeries.data.setAll([]);
     //sbSeries.data.setAll([]);
 
 
@@ -731,152 +726,6 @@ const Overview: React.FC = () => {
     };
   
   }, [selectedVariable, handlePeriodChange]);
-
-  // Pan event handler için ayrı bir effect
-  useEffect(() => {
-    if (!dateAxisRef.current) return;
-      // Erken validasyon kontrolleri
-      if (!selectedVariable || !selectedIl || !selectedGes || !selectedArac) {
-        console.log('Missing required selections:', { selectedVariable, selectedIl, selectedGes, selectedArac });
-        return;
-      }
-      if (dataBuffer.length === 0) {
-        console.log('Data buffer is empty, cannot process pan event');
-        return;
-      }   
-      // Geçersiz seçim kontrolü
-      if (selectionMin === undefined || selectionMax === undefined || 
-          isNaN(selectionMin) || isNaN(selectionMax)) {
-        console.log('Invalid selection values:', { selectionMin, selectionMax });
-        return;
-      }
-      console.log('Görünen range:', {
-        min: new Date(selectionMin).toLocaleString(),
-        max: new Date(selectionMax).toLocaleString()
-      });
-      try {
-        const start = new Date(selectionMin);
-        const end = new Date(selectionMax);
-        const now = new Date();
-        // Tarih kontrolü
-        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-          console.log('Invalid date values:', { start, end });
-          return;
-        }    
-        if (start > now) {
-          console.log('Start date is in future:', start.toLocaleString());
-          return;
-        }
-        const dbName = `${selectedIl}_${selectedGes}`;
-        console.log('Current state:', {
-          dataBufferLength: dataBuffer.length,
-          dataBufferFirst: dataBuffer[0],
-          dataBufferLast: dataBuffer[dataBuffer.length - 1],
-          selectedVariable,
-          dbName
-        });
-        // Buffer'daki verilerin gerçek zaman aralığını bul
-        const timestamps = dataBuffer.map(d => d.timestamp);
-        const bufferStart = timestamps.length > 0 ? Math.min(...timestamps) : 0;
-        const bufferEnd = timestamps.length > 0 ? Math.max(...timestamps) : 0;
-        console.log('Current buffer state:', {
-          bufferSize: timestamps.length,
-          bufferRange: timestamps.length > 0 ? {
-            start: new Date(bufferStart).toLocaleString(),
-            end: new Date(bufferEnd).toLocaleString()
-          } : 'Buffer is empty',
-          selectionStart: start.toLocaleString()
-        });
-
-        // Son 200 mum kaldığında yeni veri çek
-        const remainingCandles = timestamps.filter(t => t <= start.getTime()).length;
-        //console.log('Remaining candles:', remainingCandles);
-        if (remainingCandles <= 3000 && timestamps.length > 0) {
-          const timeToFetch = 10 * 60 * 60 * 1000; // 10 saat (milisaniye cinsinden)
-          const newStartTime = new Date(bufferStart - timeToFetch);
-          
-          /* console.log('Fetching more historical data:', {
-            fetchStart: newStartTime.toLocaleString(),
-            fetchEnd: new Date(bufferStart).toLocaleString(),
-            timeSpan: `${timeToFetch / (60 * 60 * 1000)} hours`
-          }); */
-
-          window.electronAPI.getTablesHistory(
-            dbName,
-            selectedArac,
-            undefined,
-            newStartTime,
-            new Date(bufferStart)
-          ).then(fetchedRecords => {
-            /* console.log('Fetched historical records:', {
-              count: fetchedRecords?.length || 0,
-              firstRecord: fetchedRecords?.[0],
-              lastRecord: fetchedRecords?.[fetchedRecords.length - 1]
-            }); */
-
-            if (fetchedRecords && fetchedRecords.length > 0) {
-              const newData = fetchedRecords
-                .map(record => {
-                  const value = record[selectedVariable];
-                  const numValue = Number(value);
-                  const timestamp = new Date(record.timestamp).getTime();
-                  return {
-                    timestamp: timestamp,
-                    value: numValue
-                  };
-                })
-                .filter((item): item is { timestamp: number; value: number } => 
-                  item !== null && !isNaN(item.value)
-                )
-                .sort((a, b) => a.timestamp - b.timestamp);
-
-              /* console.log('Processed new data:', {
-                count: newData.length,
-                timeRange: {
-                  start: new Date(newData[0]?.timestamp).toLocaleString(),
-                  end: new Date(newData[newData.length - 1]?.timestamp).toLocaleString()
-                }
-              }); */
-
-              /// Yeni verileri buffer'a ekle
-              setDataBuffer(prev => {
-                const combinedData = [...newData, ...prev];
-                // Timestamp'e göre sırala ve tekrar eden verileri kaldır
-                const uniqueData = Array.from(
-                  new Map(combinedData.map(item => [item.timestamp, item])).values()
-                ).sort((a, b) => a.timestamp - b.timestamp);
-
-                /* console.log('Updated historical buffer:', {
-                  previousSize: prev.length,
-                  newDataSize: newData.length,
-                  finalSize: uniqueData.length,
-                  timeRange: {
-                    start: new Date(uniqueData[0]?.timestamp).toLocaleString(),
-                    end: new Date(uniqueData[uniqueData.length - 1]?.timestamp).toLocaleString()
-                  }
-                }); */
-
-                return uniqueData;
-              }); 
-            } else {
-              console.log('No new records fetched');
-            }
-          }).catch(err => {
-            console.error('Error fetching historical data:', err);
-          });
-        } else {
-          /* console.log('No need to fetch more data:', {
-            reason: start.getTime() >= bufferStart ? 'Selection start is after buffer start' : 'Buffer is empty',
-            selectionStart: start.toLocaleString(),
-            bufferStart: new Date(bufferStart).toLocaleString()
-          }); */
-        }
-      } catch (error) {
-        console.error("Error in pan event handler:", error);
-      }
-    
-
-  }, [selectionMin,selectionMax]);
 
   // Separate effect for updating chart data
   useEffect(() => {
@@ -919,8 +768,60 @@ const Overview: React.FC = () => {
     return () => { isMounted = false; };
   }, [candlestickData]);
 
-  console.log('Overview render');
+  
 
+  // Geçmiş veri yükleme fonksiyonu
+  const loadHistoricalData = useCallback(async (startTime: Date, endTime: Date) => {
+    if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable || isLoadingHistoricalData) return;
+    
+    setIsLoadingHistoricalData(true);
+    const dbName = `${selectedIl}_${selectedGes}`;
+    
+    try {
+      const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime);
+      if (records && records.length > 0) {
+        const newData = records
+          .map(record => {
+            const value = record[selectedVariable];
+            const numValue = Number(value);
+            const timestamp = new Date(record.timestamp).getTime();
+            return {
+              timestamp: timestamp,
+              value: numValue
+            };
+          })
+          .filter((item): item is { timestamp: number; value: number } => item !== null)
+          .sort((a, b) => a.timestamp - b.timestamp);
+        
+        setHistoricalDataBuffer(prev => [...newData, ...prev]);
+        console.log("Historical Data Buffer:", [...newData, ...historicalDataBuffer]);
+      }
+    } catch (error) {
+      console.error('Geçmiş veriler yüklenirken hata:', error);
+    } finally {
+      setIsLoadingHistoricalData(false);
+    }
+  }, [selectedVariable, isLoadingHistoricalData, historicalDataBuffer]);
+
+  // DateAxis için event listener
+  useEffect(() => {
+    if (!dateAxisRef.current) return;
+    const handleStart = (start: number | undefined) => {
+      if (start === undefined || start >= 0 || isLoadingHistoricalData) return;
+        const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
+        if (!currentMin) return;
+        const from = new Date(currentMin);
+        const to = new Date(dataBuffer[0]?.timestamp || Date.now());
+        loadHistoricalData(from, to);
+    };
+    dateAxisRef.current.on("start", handleStart);
+    return () => {
+      dateAxisRef.current?.off("start", handleStart);
+    };
+  }, [dateAxisRef.current,loadHistoricalData, isLoadingHistoricalData]);
+
+
+  //console.log('Overview render');
   return (
     <div className="overview-container">
       <div className="selection-container">
@@ -934,7 +835,6 @@ const Overview: React.FC = () => {
             <option key={il} value={il}>{il}</option>
           ))}
         </select>
-
         <select 
           value={selectedGes} 
           onChange={(e) => setSelectedGes(e.target.value)}
@@ -946,7 +846,6 @@ const Overview: React.FC = () => {
             <option key={ges} value={ges}>{ges}</option>
           ))}
         </select>
-
         <select 
           value={selectedArac} 
           onChange={(e) => setSelectedArac(e.target.value)}
@@ -958,7 +857,6 @@ const Overview: React.FC = () => {
             <option key={arac} value={arac}>{arac}</option>
           ))}
         </select>
-
         <select 
           value={selectedVariable} 
           onChange={(e) => {
@@ -973,14 +871,12 @@ const Overview: React.FC = () => {
             <option key={config.name} value={config.name}>{config.name}</option>
           ))}
         </select>
-
         {aracVerisi !== null && selectedVariable && (
           <div className="selected-value">
             Değer: {aracVerisi}
           </div>
         )}
       </div>
-
       {/* amCharts toolbar container */}
       <div id="chartcontrols" className="chart-controls"></div>
       <div id="chartdiv" className="chart-container"></div>
