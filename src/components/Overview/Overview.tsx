@@ -54,23 +54,13 @@ const Overview: React.FC = () => {
 
   // Veri buffer'ları için state'ler
   const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
-  const [historicalDataBuffer, setHistoricalDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
- 
-  const [candlestickData, setCandlestickData] = useState<{
-    timestamp: number;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-  }[]>([]);
-
   const [ilList, setIlList] = useState<string[]>([]);
   const [gesList, setGesList] = useState<string[]>([]);
   const [aracList, setAracList] = useState<string[]>([]);
   const [allTables, setAllTables] = useState<{ [dbName: string]: string[] }>({});
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
+  const lastLoadTimeRef = useRef(0);
 
   function capitalize(str: string) {
     if (!str) return '';
@@ -134,7 +124,6 @@ const Overview: React.FC = () => {
       setSelectedArac('');
     }
   }, [selectedIl]);
-
   // GES seçilince tablo (araç) listesini hazırdan getir
   useEffect(() => {
     if (selectedIl && selectedGes) {
@@ -146,15 +135,11 @@ const Overview: React.FC = () => {
       setSelectedArac('');
     }
   }, [selectedGes]);
-
   // Seçim değişince veriyi sıfırla
   useEffect(() => {
-    setHasZoomedInitially(false);
     setAracVerisi(null);
     setDataBuffer([]);
-    setCandlestickData([]);
-  }, [selectedIl, selectedGes, selectedArac]);
-  
+  }, [selectedIl, selectedGes, selectedArac]); 
   // Update available variables when device selection changes
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac) {
@@ -179,7 +164,6 @@ const Overview: React.FC = () => {
     }
     setSelectedVariable('');
   }, [selectedArac]);
-
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
@@ -192,7 +176,7 @@ const Overview: React.FC = () => {
 
     // Fetch historical data
     const endTime = new Date();
-    const startTime = new Date(endTime.getTime() - 20*60*60*1000);
+    const startTime = new Date(endTime.getTime() - 10*60*60*1000);
     
     window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime)
       .then(records => {
@@ -210,13 +194,12 @@ const Overview: React.FC = () => {
             .filter((item): item is { timestamp: number; value: number } => item !== null)
             .sort((a, b) => a.timestamp - b.timestamp);
           
-          setDataBuffer(rawData);
+          setDataBuffer(rawData);        
         }
       })
       .catch(error => {
         console.error('Geçmiş veriler çekilirken hata:', error);
       });
-
     // Handle MQTT data
     const handleMqttData = (data: string) => {
       try {
@@ -229,18 +212,50 @@ const Overview: React.FC = () => {
         const value = parsedData[variableIndex + 1];
         if (value === undefined) return;
 
-        const newDataPoint = {
-          timestamp: new Date(parsedData[0]).getTime(),
-          value: value
-        };
+        const timestamp = new Date(parsedData[0]).getTime();
+        
+        // Get current time interval
+        const { timeUnit, count } = timeInterval;
+        const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+        const roundedTime = Math.floor(timestamp / ms) * ms;
 
-        setDataBuffer(prev => [...prev, newDataPoint]);
-        setAracVerisi(value.toString()); // Update the current value display
+        // Get the chart and series
+        const chart = chartRef.current;
+        if (!chart) return;
+        const valueSeries = chart.get('stockSeries');
+        if (!valueSeries) return;
+
+        // Find the current candle for this time interval
+        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime);
+        
+        if (currentCandle) {
+          // Update existing candle
+          const updatedCandle = {
+            ...currentCandle,
+            high: Math.max(currentCandle.high, value),
+            low: Math.min(currentCandle.low, value),
+            close: value,
+            volume: currentCandle.volume + 1
+          };
+          valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
+        } else {
+          // Create new candle
+          const newCandle = {
+            timestamp: roundedTime,
+            open: value,
+            high: value,
+            low: value,
+            close: value,
+            volume: 1
+          };
+          valueSeries.data.push(newCandle);
+        }
+
+        setAracVerisi(value.toString());
       } catch (error) {
         console.error('Error parsing MQTT data:', error);
       }
     };
-
     // Subscribe to MQTT updates
     const mqttIl = capitalize(selectedIl);
     const mqttGes = capitalize(selectedGes);
@@ -259,7 +274,7 @@ const Overview: React.FC = () => {
       };
     }
   }, [selectedVariable]);
-  // yukardak gelen DataBufferın mumları oluşturulur setCandlestickData
+  // yukardak gelen DataBufferın mumları oluşturulur set series
   useEffect(() => {
     if (!dataBuffer || dataBuffer.length === 0) {
       console.log('DataBuffer is empty');
@@ -314,14 +329,43 @@ const Overview: React.FC = () => {
         };
       })
       .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-
-    setCandlestickData(newCandles);
+    if(newCandles.length > 0){
+      let isMounted = true;
+      const chart = chartRef.current;
+      try {
+        if (
+          chart &&
+          newCandles.length > 0 &&
+          rootRef.current &&
+          typeof chart.get === 'function' &&
+          !(typeof chart.isDisposed === 'function' && chart.isDisposed())
+        ) {
+          const valueSeries = chart.get('stockSeries');
+          const volumeSeries = chart.get('volumeSeries');
+          if (valueSeries && volumeSeries) {          
+            valueSeries.data.setAll(newCandles);    
+            // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
+            if (!hasZoomedInitially && newCandles.length > 199) {
+              valueSeries.events.once("datavalidated", function() {
+                if (dateAxisRef.current) {
+                  const startIndex = Math.max(0, newCandles.length - 200);
+                  const start = newCandles[startIndex]?.timestamp;
+                  const end = newCandles[newCandles.length - 1]?.timestamp;
+                  if (start && end) {
+                    dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+                    setHasZoomedInitially(true);
+                  }
+                }
+              });
+            }
+          } 
+        }
+      } catch (err) {
+        console.error('Chart update error (possibly disposed):', err);
+      }
+      return () => { isMounted = false; };
+    }
   }, [dataBuffer, timeInterval]);
-
-  // Period değişikliğini yöneten fonksiyon
-  const handlePeriodChange = useCallback((newInterval: { timeUnit: "minute" | "hour", count: number }) => {
-    setTimeInterval(newInterval);
-  }, []);
 
   // Ana effect - selectedVariable değişikliğini dinler
   useEffect(() => {
@@ -523,7 +567,7 @@ const Overview: React.FC = () => {
 
     }));
     // Add scrollbar
-    /* const scrollbar = mainPanel.set("scrollbarX",
+    const scrollbar = mainPanel.set("scrollbarX",
       am5xy.XYChartScrollbar.new(root, {
         orientation: "horizontal",
         height: 50
@@ -557,7 +601,7 @@ const Overview: React.FC = () => {
     sbSeries.fills.template.setAll({
       visible: true,
       fillOpacity: 0.3
-    }); */
+    });
     // Function to get available santrals
     function getSantralList(search: string) {
       if (search === "") {
@@ -654,6 +698,48 @@ const Overview: React.FC = () => {
       }
     });
 
+
+    var intervalSwitcher = am5stock.IntervalControl.new(root, {
+      stockChart: stockChart,
+      items: [
+        { id: "1min", label: "1 Dakika", interval: { timeUnit: "minute", count: 1 } },
+        { id: "15min", label: "15 Dakika", interval: { timeUnit: "minute", count: 15 } },
+        { id: "1hour", label: "1 Saat", interval: { timeUnit: "hour", count: 1 } },
+        { id: "3hour", label: "3 Saat", interval: { timeUnit: "hour", count: 3 } }
+      ]
+    });
+    
+    // Interval değişikliğini dinle
+    intervalSwitcher.events.on("selected", function(ev) {
+      if (!ev.item || typeof ev.item === 'string') return;
+      
+      const item = ev.item as unknown as { interval: { timeUnit: "minute" | "hour"; count: number } };
+      
+      setTimeInterval({
+        timeUnit: item.interval.timeUnit,
+        count: item.interval.count
+      });
+
+      // Ana seriyi al
+      const valueSeries = stockChart.get("stockSeries");
+      if (!valueSeries) return;
+
+      // Veri yüklendiğinde zoom out yap
+      valueSeries.events.once("datavalidated", function() {
+        if (dateAxisRef.current) {
+          dateAxisRef.current.zoomToDates(new Date(), new Date());
+        }
+      });
+
+      // DateAxis'i güncelle
+      if (dateAxisRef.current) {
+        dateAxisRef.current.set("baseInterval", {
+          timeUnit: item.interval.timeUnit,
+          count: item.interval.count
+        });
+      }
+    });
+
     // Add toolbar
     const container = document.getElementById("chartcontrols");
     if (container) {
@@ -677,35 +763,10 @@ const Overview: React.FC = () => {
           }),
           am5stock.SettingsControl.new(root, {
             stockChart: stockChart
-          })
+          }),
+          intervalSwitcher
         ]
       });
-      // Custom zaman aralığı buton grubu
-      const oldDiv = document.getElementById('custom-time-interval-group');
-      if (oldDiv) oldDiv.remove();
-      const timeIntervalDiv = document.createElement('div');
-      timeIntervalDiv.id = 'custom-time-interval-group';
-      timeIntervalDiv.style.display = 'flex';
-      timeIntervalDiv.style.gap = '4px';
-      timeIntervalDiv.style.marginLeft = '12px';
-      const intervals = [
-        { label: "1Dk", value: { timeUnit: "minute", count: 1 } },
-        { label: "15Dk", value: { timeUnit: "minute", count: 15 } },
-        { label: "1Saat", value: { timeUnit: "hour", count: 1 } },
-        { label: "3Saat", value: { timeUnit: "hour", count: 3 } }
-      ];
-      intervals.forEach((item) => {
-        const btn = document.createElement("button");
-        btn.innerText = item.label;
-        btn.className = "am5stock-control am5stock-control-button";
-        btn.style.cursor = "pointer";
-        btn.style.background = (timeInterval.timeUnit === item.value.timeUnit && timeInterval.count === item.value.count) ? "#e6e6e6" : "#fff";
-        btn.onclick = () => {
-          setTimeInterval(item.value as { timeUnit: "minute" | "hour"; count: number });
-        };
-        timeIntervalDiv.appendChild(btn);
-      });
-      container.appendChild(timeIntervalDiv);
     }
 
     // Save references
@@ -714,7 +775,7 @@ const Overview: React.FC = () => {
     // Initialize with empty data
     valueSeries.data.setAll([]);
     //volumeSeries.data.setAll([]);
-    //sbSeries.data.setAll([]);
+    sbSeries.data.setAll([]);
 
 
     // Cleanup
@@ -725,53 +786,11 @@ const Overview: React.FC = () => {
       }
     };
   
-  }, [selectedVariable, handlePeriodChange]);
-
-  // Separate effect for updating chart data
-  useEffect(() => {
-    let isMounted = true;
-    const chart = chartRef.current;
-    try {
-      if (
-        chart &&
-        candlestickData.length > 0 &&
-        rootRef.current &&
-        typeof chart.get === 'function' &&
-        !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-      ) {
-        const valueSeries = chart.get('stockSeries');
-        const volumeSeries = chart.get('volumeSeries');
-        if (valueSeries && volumeSeries) {
-          valueSeries.data.setAll(candlestickData);    //// SORUN BURDA BUFFER HER GEÇMİŞ VERİ GELDİĞİNDE BURASI TETİKLENDİĞİ İÇİN YENİ CANDLARA YANİ GEÇMİŞ İÇİN OLUŞTURULANLARA KAYIYOR ORAYA KAYINCA DA YENİDEN GEÇMİŞ ÇEKİYOR ,
-
-          //volumeSeries.data.setAll(candlestickData);
-        
-          // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
-          if (!hasZoomedInitially && candlestickData.length > 199) {
-            valueSeries.events.once("datavalidated", function() {
-              if (dateAxisRef.current) {
-                const startIndex = Math.max(0, candlestickData.length - 200);
-                const start = candlestickData[startIndex]?.timestamp;
-                const end = candlestickData[candlestickData.length - 1]?.timestamp;
-                if (start && end) {
-                  dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-                  setHasZoomedInitially(true);
-                }
-              }
-            });
-          }
-        } 
-      }
-    } catch (err) {
-      console.error('Chart update error (possibly disposed):', err);
-    }
-    return () => { isMounted = false; };
-  }, [candlestickData]);
-
-  
+  }, [selectedVariable]);
 
   // Geçmiş veri yükleme fonksiyonu
   const loadHistoricalData = useCallback(async (startTime: Date, endTime: Date) => {
+    console.log("çekiliyoor")
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable || isLoadingHistoricalData) return;
     
     setIsLoadingHistoricalData(true);
@@ -792,33 +811,134 @@ const Overview: React.FC = () => {
           })
           .filter((item): item is { timestamp: number; value: number } => item !== null)
           .sort((a, b) => a.timestamp - b.timestamp);
+
+        // Zaman aralığına göre timestamp'i yuvarla
+        const getRoundedTimestamp = (timestamp: number) => {
+          const { timeUnit, count } = timeInterval;
+          const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+          return Math.floor(timestamp / ms) * ms;
+        };
+
+        // Seçilen zaman aralığına göre gruplama
+        const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
         
-        setHistoricalDataBuffer(prev => [...newData, ...prev]);
-        console.log("Historical Data Buffer:", [...newData, ...historicalDataBuffer]);
+        newData.forEach(d => {
+          const roundedTime = getRoundedTimestamp(d.timestamp);
+          if (!grouped.has(roundedTime)) {
+            grouped.set(roundedTime, { values: [], timestamps: [] });
+          }
+          const group = grouped.get(roundedTime)!;
+          group.values.push(d.value);
+          group.timestamps.push(d.timestamp);
+        });
+
+        // Her zaman aralığı için bir mum oluştur
+        const historicalCandles = Array.from(grouped.entries())
+          .filter(([_, group]) => group.values.length > 0)
+          .sort(([timeA], [timeB]) => timeA - timeB)
+          .map(([time, group]) => {
+            const values = group.values;
+            if (values.length === 0) return null;
+            
+            const open = values[0];
+            const close = values[values.length - 1];
+            const high = Math.max(...values);
+            const low = Math.min(...values);
+            
+            if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
+              console.log('Invalid candle values:', { time, open, close, high, low });
+              return null;
+            }
+            
+            return {
+              timestamp: time,
+              open,
+              high,
+              low,
+              close,
+              volume: values.length
+            };
+          })
+          .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
+        
+        if(historicalCandles.length > 0){
+          let isMounted = true;
+          const chart = chartRef.current;
+          try {
+            if (
+              chart &&
+              historicalCandles.length > 0 &&
+              rootRef.current &&
+              typeof chart.get === 'function' &&
+              !(typeof chart.isDisposed === 'function' && chart.isDisposed())
+            ) {
+              const valueSeries = chart.get('stockSeries');
+              const volumeSeries = chart.get('volumeSeries');
+              if (valueSeries && volumeSeries) {
+                console.log("valueseries before",valueSeries.data.length);
+                console.log("historicalCandles",historicalCandles);
+                const existingData = valueSeries.data.values;
+                const combinedData = [...historicalCandles, ...existingData];
+                valueSeries.data.setAll(combinedData);
+                console.log("valueseries after",valueSeries.data.length);
+              }
+            }
+          } catch (err) {
+            console.error('Historical chart update error:', err);
+          }
+          return () => { isMounted = false; };
+        }
+        //console.log("Historical Data Buffer:", historicalCandles);
       }
     } catch (error) {
       console.error('Geçmiş veriler yüklenirken hata:', error);
     } finally {
       setIsLoadingHistoricalData(false);
     }
-  }, [selectedVariable, isLoadingHistoricalData, historicalDataBuffer]);
+  }, [selectedVariable, timeInterval]);
 
   // DateAxis için event listener
   useEffect(() => {
-    if (!dateAxisRef.current) return;
+    if (!dateAxisRef.current && !hasZoomedInitially) {
+      return;
+    }
     const handleStart = (start: number | undefined) => {
-      if (start === undefined || start >= 0 || isLoadingHistoricalData) return;
-        const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
-        if (!currentMin) return;
-        const from = new Date(currentMin);
-        const to = new Date(dataBuffer[0]?.timestamp || Date.now());
+      if (start === undefined || isLoadingHistoricalData) return;
+      
+      // Son yüklemeden bu yana 10 saniye geçmediyse çık
+      const now = Date.now();
+      if (now - lastLoadTimeRef.current < 1000) {
+        return;
+      }
+      
+      const chart = chartRef.current;
+      if (!chart) return;
+      
+      const valueSeries = chart.get('stockSeries');
+      if (!valueSeries) return;
+
+      const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
+      if (!currentMin) return;
+
+      const seriesData = valueSeries.data.values as { timestamp: number }[];
+      if (!seriesData || seriesData.length === 0) return;
+
+      const oldestDataPoint = seriesData[0] as { timestamp: number };
+      const oldestTimestamp = oldestDataPoint.timestamp;
+      
+      const oneHourInMs = 5*60 * 60 * 1000; 
+      if (currentMin - oldestTimestamp < oneHourInMs) {
+        const from = new Date(oldestTimestamp - oneHourInMs);
+        const to = new Date(oldestTimestamp);
+        lastLoadTimeRef.current = now;
         loadHistoricalData(from, to);
+      }
     };
-    dateAxisRef.current.on("start", handleStart);
+    dateAxisRef.current?.on("start", handleStart);
     return () => {
       dateAxisRef.current?.off("start", handleStart);
     };
-  }, [dateAxisRef.current,loadHistoricalData, isLoadingHistoricalData]);
+  }, [dateAxisRef.current, loadHistoricalData]);
 
 
   //console.log('Overview render');
