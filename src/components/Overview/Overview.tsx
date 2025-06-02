@@ -5,7 +5,7 @@ import * as am5stock from '@amcharts/amcharts5/stock';
 import am5themes_Animated from '@amcharts/amcharts5/themes/Animated';
 import './Overview.css';
 import deviceConfigs from '../../config/deviceConfigs.json';
-
+import NestedDropdown from './mainSeriesNestedDropDown';
 // Type definitions for deviceConfigs
 type DataField = {
   name: string;
@@ -24,6 +24,10 @@ type GesConfig = {
 };
 type DeviceConfigs = {
   [key: string]: GesConfig;
+};
+type VariableConfig = {
+  name: string;
+  index: number;
 };
 
 declare global {
@@ -44,9 +48,8 @@ const Overview: React.FC = () => {
   const [selectedIl, setSelectedIl] = useState('');
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
-  const [aracVerisi, setAracVerisi] = useState<string | null>(null);
   const [selectedVariable, setSelectedVariable] = useState('');
-  const [availableVariables, setAvailableVariables] = useState<DataField[]>([]);
+  const [dropdownData, setDropdownData] = useState<Record<string, Record<string, Record<string, VariableConfig[]>>>>({});
   const timeIntervalRef = useRef<{
     timeUnit: "minute" | "hour";
     count: number;
@@ -54,10 +57,6 @@ const Overview: React.FC = () => {
 
   // Veri buffer'ları için state'ler
   const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
-  const [ilList, setIlList] = useState<string[]>([]);
-  const [gesList, setGesList] = useState<string[]>([]);
-  const [aracList, setAracList] = useState<string[]>([]);
-  const [allTables, setAllTables] = useState<{ [dbName: string]: string[] }>({});
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
   const lastLoadTimeRef = useRef(0);
@@ -85,85 +84,41 @@ const Overview: React.FC = () => {
     if (lower.startsWith('rtu')) return 'rtu';
     return '';
   }
-  // Tüm veritabanları ve tablo isimlerini başta çek
+ 
   useEffect(() => {
     if (!window.electronAPI?.getAllTables) return;
-    window.electronAPI.getAllTables().then((all) => {
-      setAllTables(all);
-      const names = Object.keys(all);
-      // İl adlarını benzersiz olarak bul
+    window.electronAPI.getAllTables().then((allTables) => {
+      const data: Record<string, Record<string, Record<string, VariableConfig[]>>> = {};
       const ilSet = new Set<string>();
-      names.forEach(name => {
-        const [il] = name.split('_');
+
+      Object.keys(allTables).forEach(dbName => {
+        const [il, ...gesArr] = dbName.split('_');
+        const ges = gesArr.join('_');
         ilSet.add(il);
+        
+        if (!data[il]) data[il] = {};
+        if (!data[il][ges]) data[il][ges] = {};
+
+        allTables[dbName].forEach(arac => {
+          let variables: VariableConfig[] = [];
+          const deviceType = getDeviceType(arac);
+          const config = (deviceConfigs as any)[il]?.[ges]?.[deviceType];
+          if (Array.isArray(config)) {
+            variables = config.map((v: any) => ({
+              name: v.name,
+              index: v.index
+            }));
+          }
+          data[il][ges][arac] = variables;
+        });
       });
-      setIlList(Array.from(ilSet));
+
+      setDropdownData(data);
     });
   }, []);
 
-  // İl seçilince GES listesini güncelle
-  useEffect(() => {
-    if (selectedIl) {
-      const gesSet = new Set<string>();
-      Object.keys(allTables).forEach(name => {
-        const [il, ...gesArr] = name.split('_');
-        if (il === selectedIl && gesArr.length > 0) {
-          gesSet.add(gesArr.join('_'));
-        }
-      });
-      setGesList(Array.from(gesSet));
-      setSelectedGes('');
-      setAracList([]);
-      setSelectedArac('');
-      setSelectedVariable('');
-      setAvailableVariables([]);
-    } else {
-      setGesList([]);
-      setSelectedGes('');
-      setAracList([]);
-      setSelectedArac('');
-    }
-  }, [selectedIl]);
-  // GES seçilince tablo (araç) listesini hazırdan getir
-  useEffect(() => {
-    if (selectedIl && selectedGes) {
-      const dbName = `${selectedIl}_${selectedGes}`;
-      setAracList(allTables[dbName] || []);
-      setSelectedArac('');
-    } else {
-      setAracList([]);
-      setSelectedArac('');
-    }
-  }, [selectedGes]);
-  // Seçim değişince veriyi sıfırla
-  useEffect(() => {
-    setAracVerisi(null);
-
-  }, [selectedIl, selectedGes, selectedArac]); 
-  // Update available variables when device selection changes
-  useEffect(() => {
-    if (!selectedIl || !selectedGes || !selectedArac) {
-      setAvailableVariables([]);
-      setSelectedVariable('');
-      return;
-    }
-
-    const deviceType = getDeviceType(selectedArac);
-    if (!deviceType) {
-      setAvailableVariables([]);
-      setSelectedVariable('');
-      return;
-    }
-
-    // Use capitalize for both selectedIl and selectedGes to match JSON keys
-    const configCap = (deviceConfigs as DeviceConfigs)[selectedIl]?.[selectedGes]?.[deviceType as keyof DeviceTypeConfig];
-    if (configCap) {
-      setAvailableVariables(configCap as DataField[]);
-    } else {
-      setAvailableVariables([]);
-    }
-    setSelectedVariable('');
-  }, [selectedArac]);
+ 
+ 
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
@@ -171,7 +126,8 @@ const Overview: React.FC = () => {
     setHasZoomedInitially(false);
     
     const dbName = `${selectedIl}_${selectedGes}`;
-    const variableConfig = availableVariables.find(v => v.name === selectedVariable);
+    const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
+
     if (!variableConfig) return;
     // Fetch historical data
     const endTime = new Date();
@@ -344,7 +300,6 @@ const Overview: React.FC = () => {
           volumeSeries?.data.push(newCandle);
         }
 
-        setAracVerisi(value.toString());
       } catch (error) {
         console.error('Error parsing MQTT data:', error);
       }
@@ -702,64 +657,7 @@ const Overview: React.FC = () => {
       comparingSeries.data.setAll(data);
     }
 
-    // Add main series control
-    const mainSeriesControl = am5stock.DropdownListControl.new(root, {
-      stockChart: stockChart,
-      name: valueSeries.get("name"),
-      icon: am5stock.StockIcons.getIcon("Candlestick Series"),
-      fixedLabel: true,
-      searchable: true,
-      searchCallback: function(query) {
-        const mainSeries = stockChart.get("stockSeries");
-        const mainSeriesID = mainSeries ? mainSeries.get("name") : "";
-        const list = getSantralList(query);
-        list.forEach((item) => {
-          if (item.id === mainSeriesID) {
-            (item as { disabled?: boolean }).disabled = true;
-          }
-        });
-        return list;
-      }
-    });
-
-    // Add comparison control
-    const comparisonControl = am5stock.ComparisonControl.new(root, {
-      stockChart: stockChart,
-      searchable: true,
-      searchCallback: function(query) {
-        const compared = stockChart.getPrivate("comparedSeries", []);
-        const main = stockChart.get("stockSeries");
-        if (compared.length > 4) {
-          return [{
-            label: "En fazla 5 santral karşılaştırılabilir",
-            subLabel: "Yeni eklemek için bazılarını kaldırın",
-            id: "",
-            className: "am5stock-list-info"
-          }];
-        }
-
-        const comparedIds: string[] = [];
-        compared.forEach((series: any) => {
-          comparedIds.push(series.get("name"));
-        });
-
-        const list = getSantralList(query);
-        list.forEach((item) => {
-          if (comparedIds.indexOf(item.id) !== -1 || (main && main.get("name") === item.id)) {
-            (item as { disabled?: boolean }).disabled = true;
-          }
-        });
-        return list;
-      }
-    });
-
-    // Handle comparison selection
-    comparisonControl.events.on("selected", function(ev) {
-      if (typeof ev.item === 'object' && ev.item !== null && 'id' in ev.item && ev.item.id !== "") {
-        addComparingSeries((ev.item as any).subLabel);
-      }
-    });
-
+  
 
     var intervalSwitcher = am5stock.IntervalControl.new(root, {
       stockChart: stockChart,
@@ -792,8 +690,6 @@ const Overview: React.FC = () => {
         container: container,
         stockChart: stockChart,
         controls: [
-          mainSeriesControl,
-          comparisonControl,
           am5stock.DateRangeSelector.new(root, {
             stockChart: stockChart
           }),
@@ -1078,59 +974,17 @@ const Overview: React.FC = () => {
   return (
     <div className="overview-container">
       <div className="selection-container">
-        <select 
-          value={selectedIl} 
-          onChange={(e) => setSelectedIl(e.target.value)}
-          className="select-box"
-        >
-          <option value="">İl Seçiniz</option>
-          {ilList.map((il) => (
-            <option key={il} value={il}>{il}</option>
-          ))}
-        </select>
-        <select 
-          value={selectedGes} 
-          onChange={(e) => setSelectedGes(e.target.value)}
-          className="select-box"
-          disabled={!selectedIl}
-        >
-          <option value="">GES Seçiniz</option>
-          {gesList.map((ges) => (
-            <option key={ges} value={ges}>{ges}</option>
-          ))}
-        </select>
-        <select 
-          value={selectedArac} 
-          onChange={(e) => setSelectedArac(e.target.value)}
-          className="select-box"
-          disabled={!selectedGes}
-        >
-          <option value="">Araç Seçiniz</option>
-          {aracList.map((arac) => (
-            <option key={arac} value={arac}>{arac}</option>
-          ))}
-        </select>
-        <select 
-          value={selectedVariable} 
-          onChange={(e) => {
-            setSelectedVariable(e.target.value);
-            setDataBuffer([]);
+        <NestedDropdown
+          dropdownData={dropdownData}
+          onSelect={(il, ges, arac, variable) => {
+            setSelectedIl(il);
+            setSelectedGes(ges);
+            setSelectedArac(arac);
+            setSelectedVariable(variable);
           }}
-          className="select-box"
-          disabled={!selectedArac || !Array.isArray(availableVariables) || availableVariables.length === 0}
-        >
-          <option value="">Değişken Seçiniz</option>
-          {Array.isArray(availableVariables) && availableVariables.map((config) => (
-            <option key={config.name} value={config.name}>{config.name}</option>
-          ))}
-        </select>
-        {aracVerisi !== null && selectedVariable && (
-          <div className="selected-value">
-            Değer: {aracVerisi}
-          </div>
-        )}
+        />
       </div>
-      {/* amCharts toolbar container */}
+     
       <div id="chartcontrols" className="chart-controls"></div>
       <div id="chartdiv" className="chart-container"></div>
     </div>
