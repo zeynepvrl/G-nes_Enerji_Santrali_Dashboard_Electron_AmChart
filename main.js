@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const mqtt = require('mqtt')
 const { Pool } = require('pg')
+const sql = require('mssql')
 const isDev = process.argv.includes('--dev')
 
 let mainWindow;
@@ -11,6 +12,18 @@ let currentSubscribedTopic = null;
 
 //const MAX_DB_RETRIES = 5; // Maksimum deneme sayısı
 const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)
+
+// MSSQL bağlantı konfigürasyonu
+const mssqlConfig = {
+    server: '192.168.234.3\\prod19',
+    database: 'ZENON',
+    user: 'zenon',
+    password: 'zeN&N-8QL*',
+    options: {
+        encrypt: false,
+        trustServerCertificate: true
+    }
+};
 
 function createWindow () {
   mainWindow = new BrowserWindow({
@@ -174,8 +187,8 @@ ipcMain.handle('get-tables', async (event, dbName, tableName, limit, startTime, 
       }
     }
 
-    console.log('Executing query:', query);
-    console.log('With params:', params);
+    //console.log('Executing query:', query);
+    //console.log('With params:', params);
 
     const result = await tempPool.query(query, params);
     
@@ -302,6 +315,68 @@ ipcMain.handle('subscribe-mqtt', async (event, topic) => {
       });
     }
   });
+});
+
+
+let globalPool; // 🌐 Bağlantı havuzu
+
+
+async function initSqlConnection() {
+  if (!globalPool) {
+    try {
+      globalPool = await sql.connect(mssqlConfig);
+      console.log("✅ MSSQL bağlantısı kuruldu");
+    } catch (err) {
+      console.error("❌ MSSQL bağlantısı kurulamadı:", err);
+    }
+  }
+}
+
+
+app.whenReady().then(async () => {
+  await initSqlConnection();
+  // diğer başlangıç fonksiyonları
+});
+
+
+ipcMain.handle('get-mssql-tables', async () => {
+  if (!globalPool) {
+    console.error("⚠ MSSQL bağlantısı yok");
+    return [];
+  }
+
+  try {
+    const result = await globalPool
+      .request()
+      .query(`
+        SELECT
+          vars.NAME,
+          latest.WERT,
+          latest.DATUMZEIT
+        FROM
+          (SELECT DISTINCT NAME FROM dbo.ENERGY) AS vars
+          OUTER APPLY (
+            SELECT TOP 1 WERT, DATUMZEIT
+            FROM dbo.ENERGY
+            WHERE NAME = vars.NAME
+            ORDER BY DATUMZEIT DESC
+          ) AS latest
+      `);
+
+    const measurements = result.recordset.map(row => ({
+      tableName: row.NAME,
+      name: row.NAME,
+      WERT: Math.abs(Number(row.WERT)),
+      DATUMZEIT: row.DATUMZEIT
+    }));
+
+    console.log("measurements", measurements.length);
+    return measurements;
+
+  } catch (error) {
+    console.error("❌ MSSQL sorgu hatası:", error.message);
+    return [];
+  }
 });
 
 app.whenReady().then(() => {

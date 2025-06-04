@@ -116,16 +116,13 @@ const Overview: React.FC = () => {
       setDropdownData(data);
     });
   }, []);
-
- 
- 
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
     if (selectedArac === "" || selectedVariable === "") return;
-    setHasZoomedInitially(false);
-    
+   
     const dbName = `${selectedIl}_${selectedGes}`;
+    console.log("dropdownData", dropdownData)
     const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
 
     if (!variableConfig) return;
@@ -253,8 +250,8 @@ const Overview: React.FC = () => {
         
         const variableIndex = variableConfig.index;
         if (variableIndex === undefined) return;
-        
         const value = parsedData[variableIndex + 1];
+        console.log("value", value)
         if (value === undefined) return;
 
         const timestamp = new Date(parsedData[0]).getTime();
@@ -322,100 +319,6 @@ const Overview: React.FC = () => {
       };
     }
   }, [selectedVariable]);
-  // yukardak gelen DataBufferın mumları oluşturulur set series
-  /* useEffect(() => {
-    if (!dataBuffer || dataBuffer.length === 0) {
-      console.log('DataBuffer is empty');
-      return;
-    }
-
-    // Zaman aralığına göre timestamp'i yuvarla
-    const getRoundedTimestamp = (timestamp: number) => {
-      const { timeUnit, count } = timeInterval;
-      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-      return Math.floor(timestamp / ms) * ms;
-    };
-
-    // Seçilen zaman aralığına göre gruplama
-    const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-    
-    dataBuffer.forEach(d => {
-      const roundedTime = getRoundedTimestamp(d.timestamp);
-      if (!grouped.has(roundedTime)) {
-        grouped.set(roundedTime, { values: [], timestamps: [] });
-      }
-      const group = grouped.get(roundedTime)!;
-      group.values.push(d.value);
-      group.timestamps.push(d.timestamp);
-    });
-
-    // Her zaman aralığı için bir mum oluştur
-    const newCandles = Array.from(grouped.entries())
-      .filter(([_, group]) => group.values.length > 0)
-      .sort(([timeA], [timeB]) => timeA - timeB)
-      .map(([time, group]) => {
-        const values = group.values;
-        if (values.length === 0) return null;
-        
-        const open = values[0];
-        const close = values[values.length - 1];
-        const high = Math.max(...values);
-        const low = Math.min(...values);
-        
-        if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
-          console.log('Invalid candle values:', { time, open, close, high, low });
-          return null;
-        }
-        
-        return {
-          timestamp: time,
-          open,
-          high,
-          low,
-          close,
-          volume: values.length
-        };
-      })
-      .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-    if(newCandles.length > 0){
-      let isMounted = true;
-      const chart = chartRef.current;
-      try {
-        if (
-          chart &&
-          newCandles.length > 0 &&
-          rootRef.current &&
-          typeof chart.get === 'function' &&
-          !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-        ) {
-          const valueSeries = chart.get('stockSeries');
-          const volumeSeries = chart.get('volumeSeries');
-          if (valueSeries && volumeSeries) {          
-            valueSeries.data.setAll(newCandles);    
-            // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
-            if (!hasZoomedInitially && newCandles.length > 199) {
-              valueSeries.events.once("datavalidated", function() {
-                if (dateAxisRef.current) {
-                  const startIndex = Math.max(0, newCandles.length - 200);
-                  const start = newCandles[startIndex]?.timestamp;
-                  const end = newCandles[newCandles.length - 1]?.timestamp;
-                  if (start && end) {
-                    dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-                    setHasZoomedInitially(true);
-                  }
-                }
-              });
-            }
-          } 
-        }
-      } catch (err) {
-        console.error('Chart update error (possibly disposed):', err);
-      }
-      return () => { isMounted = false; };
-    }
-  }, [timeInterval]);
- */
-
   // Ana effect - selectedVariable değişikliğini dinler
   useEffect(() => {
     if (!selectedVariable) return;
@@ -616,49 +519,6 @@ const Overview: React.FC = () => {
 
     }));
     
-    
-    
-   
-    // Function to get available santrals
-    function getSantralList(search: string) {
-      if (search === "") {
-        return [];
-      }
-      search = search.toLowerCase();
-      const santrals: { label: string; subLabel: string; id: string; disabled?: boolean }[] = [
-        { label: "GES-1 Santrali", subLabel: "GES-1", id: "GES-1" },
-        { label: "GES-2 Santrali", subLabel: "GES-2", id: "GES-2" },
-        { label: "GES-3 Santrali", subLabel: "GES-3", id: "GES-3" },
-        { label: "GES-4 Santrali", subLabel: "GES-4", id: "GES-4" },
-        { label: "GES-5 Santrali", subLabel: "GES-5", id: "GES-5" }
-      ];
-
-      return santrals.filter((item) => {
-        return item.label.toLowerCase().includes(search) || 
-               item.subLabel.toLowerCase().includes(search);
-      });
-    }
-    // Function to add comparing series
-    function addComparingSeries(label: string) {
-      const series = am5xy.LineSeries.new(root, {
-        name: label,
-        valueYField: "close",
-        calculateAggregates: true,
-        valueXField: "timestamp",
-        xAxis: dateAxis,
-        yAxis: valueAxis,
-        legendValueText: "[fontSize: 12px #0d6efd bold]{valueY.formatNumber('#,###.00')}[/]",
-        tooltip: am5.Tooltip.new(root, {
-          labelText: "[fontSize: 12px #666666]{name}: [/][fontSize: 12px #0d6efd bold]{valueY.formatNumber('#,###.00')}[/]"
-        })
-      });
-      const comparingSeries = stockChart.addComparingSeries(series);
-      const data = generateData(); // Karşılaştırma serisi için veri
-      comparingSeries.data.setAll(data);
-    }
-
-  
-
     var intervalSwitcher = am5stock.IntervalControl.new(root, {
       stockChart: stockChart,
       items: [
@@ -667,8 +527,7 @@ const Overview: React.FC = () => {
         { id: "1hour", label: "1 Saat", interval: { timeUnit: "hour", count: 1 } },
         { id: "3hour", label: "3 Saat", interval: { timeUnit: "hour", count: 3 } }
       ]
-    });
-    
+    });   
     // Interval değişikliğini dinle
     intervalSwitcher.events.on("selected", function(ev) {
       if (!ev.item || typeof ev.item === 'string') return;
@@ -839,6 +698,7 @@ const Overview: React.FC = () => {
 
   // DateAxis için event listener
   useEffect(() => {
+    console.log("dateAxisRef.current useeffect çağrıldı")
     if (!dateAxisRef.current && !hasZoomedInitially) {
       return;
     }
@@ -970,18 +830,24 @@ const Overview: React.FC = () => {
       // Cleanup function if needed
     };
   }, [timeIntervalRef.current]);
-  
+
   return (
     <div className="overview-container">
       <div className="selection-container">
         <NestedDropdown
           dropdownData={dropdownData}
           onSelect={(il, ges, arac, variable) => {
+            console.log("onSelect",il, ges, arac, variable);
             setSelectedIl(il);
             setSelectedGes(ges);
             setSelectedArac(arac);
             setSelectedVariable(variable);
+            setHasZoomedInitially(false);
           }}
+          selectedIl={selectedIl}
+          selectedGes={selectedGes}
+          selectedArac={selectedArac}
+          selectedVariable={selectedVariable}
         />
       </div>
      

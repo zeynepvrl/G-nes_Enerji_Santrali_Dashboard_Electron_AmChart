@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { FaChartBar, FaFileAlt, FaCog } from 'react-icons/fa';
+import { FaChartBar, FaFileAlt, FaCog, FaBell } from 'react-icons/fa';
 import './Navbar.css';
 
 const Navbar: React.FC = () => {
@@ -11,6 +11,10 @@ const Navbar: React.FC = () => {
         <NavLink to="/" className="navbar-link">
           <FaChartBar className="navbar-icon" />
           <span>Genel Bakış</span>
+        </NavLink>
+        <NavLink to="/alarms" className="navbar-link">
+          <FaBell className="navbar-icon" />
+          <span>Alarmlar</span>
         </NavLink>
         <NavLink to="/reports" className="navbar-link">
           <FaFileAlt className="navbar-icon" />
