@@ -110,7 +110,12 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                     <div>
                         <h2>Ölçüm Değerleri</h2>
                         <div>
-                            {measurements.map((measurement, index) => {
+                            {measurements
+                                .filter(measurement => {
+                                    const limit = gesLimits[measurement.name] ?? 950;
+                                    return measurement.WERT > limit;
+                                })
+                                .map((measurement, index) => {
                                 const limit = gesLimits[measurement.name] ?? 950;
                                 const isAlarm = measurement.WERT > limit;
                                 const gesName = getGesName(measurement.name);

@@ -35,3 +35,9 @@ Bu proje, Electron ve React tabanlı bir masaüstü enerji yönetim panelidir. P
 
 ## Katkı
 Pull request ve issue'larınızı bekliyoruz! 
+
+
+
+npm run dist ile build edersin release dosyasında exe dosyası kurulum dosyası 
+package.json daki verisionu güncelleyerek push edersen kullanıcılarda da güncellenir
+bu otamatik güncellemeyi git bash a github dan aldığım token ile sağladım
