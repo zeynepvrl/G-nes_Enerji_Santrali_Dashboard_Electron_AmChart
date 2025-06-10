@@ -18,9 +18,9 @@ declare global {
 }
 
 const defaultLimits: Record<string, number> = {
-    'Konya.Eforges6.RTU.H02.Meas.P_TC_SQL': 300,
-    'Konya.Espeges3.RTU.H02.Meas.P_TC_SQL': 200,
-    'Konya.Worldmedicine.RTU.H02.Meas.P_TC_SQL': 500,
+    'Konya.Eforges6.RTU.H02.Meas.P_TC_SQL': 950,
+    'Konya.Espeges3.RTU.H02.Meas.P_TC_SQL': 950,
+    'Konya.Worldmedicine.RTU.H02.Meas.P_TC_SQL': 950,
 };
 
 interface AlarmsProps {
@@ -59,7 +59,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
 
     useEffect(() => {
         const anyAlarm = measurements.some(measurement => {
-            const limit = gesLimits[measurement.name] ?? 900;
+            const limit = gesLimits[measurement.name] ?? 950;
             return measurement.WERT > limit;
         });
         if (anyAlarm && audioRef.current) {
@@ -111,7 +111,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                         <h2>Ölçüm Değerleri</h2>
                         <div>
                             {measurements.map((measurement, index) => {
-                                const limit = gesLimits[measurement.name] ?? 900;
+                                const limit = gesLimits[measurement.name] ?? 950;
                                 const isAlarm = measurement.WERT > limit;
                                 const gesName = getGesName(measurement.name);
 

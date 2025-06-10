@@ -4,6 +4,8 @@ const mqtt = require('mqtt')
 const { Pool } = require('pg')
 const sql = require('mssql')
 const isDev = process.argv.includes('--dev')
+const { autoUpdater } = require('electron-updater')
+const { dialog } = require('electron');
 
 let mainWindow;
 let dbPool;
@@ -42,7 +44,6 @@ function createWindow () {
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'))
-    mainWindow.webContents.openDevTools()
   }
 
   // F12 ile geliştirici araçlarını aç
@@ -379,10 +380,33 @@ ipcMain.handle('get-mssql-tables', async () => {
   }
 });
 
+
+
+autoUpdater.on('update-available', () => {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Güncelleme Kontrolü',
+    message: 'Yeni bir sürüm mevcut. İndiriliyor...',
+  });
+});
+
+autoUpdater.on('update-downloaded', () => {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Yeniden Başlat',
+    message: 'Güncelleme indirildi. Uygulama şimdi yeniden başlayacak.',
+  }).then(() => {
+    autoUpdater.quitAndInstall();
+  });
+});
+
+
 app.whenReady().then(() => {
   createWindow()
   setupMqtt()
   setupDatabase()
+
+  autoUpdater.checkForUpdatesAndNotify();           //Kullanıcı uygulamayı açtığında güncelleme var mı diye kontrol eder ve varsa indirip yükler.
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
