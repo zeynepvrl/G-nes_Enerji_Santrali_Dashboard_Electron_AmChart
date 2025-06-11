@@ -6,11 +6,24 @@ const sql = require('mssql')
 const isDev = process.argv.includes('--dev')
 const { autoUpdater } = require('electron-updater')
 const { dialog } = require('electron');
+const log = require('electron-log');
+
 
 let mainWindow;
 let dbPool;
 let mqttClient;
 let currentSubscribedTopic = null;
+
+
+
+
+// Güncelleme loglarını yazdırmak için
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+
+// Hangi kanal kullanılacak (opsiyonel)
+autoUpdater.channel = 'latest';
+
 
 //const MAX_DB_RETRIES = 5; // Maksimum deneme sayısı
 const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)
@@ -382,23 +395,38 @@ ipcMain.handle('get-mssql-tables', async () => {
 
 
 
-autoUpdater.on('update-available', () => {
+autoUpdater.on('update-available', (info) => {
+  console.log('Yeni güncelleme mevcut:', info.version);
   dialog.showMessageBox({
     type: 'info',
     title: 'Güncelleme Kontrolü',
-    message: 'Yeni bir sürüm mevcut. İndiriliyor...',
+    message: `Yeni bir sürüm (${info.version}) bulundu. İndiriliyor...`,
   });
 });
 
-autoUpdater.on('update-downloaded', () => {
-  dialog.showMessageBox({
-    type: 'info',
-    title: 'Yeniden Başlat',
-    message: 'Güncelleme indirildi. Uygulama şimdi yeniden başlayacak.',
-  }).then(() => {
-    autoUpdater.quitAndInstall();
-  });
+
+autoUpdater.on('error', (err) => {
+  console.error('Güncelleme sırasında hata:', err);
 });
+
+autoUpdater.on('download-progress', (progressObj) => {
+  console.log(`İndirilen: ${progressObj.percent.toFixed(2)}%`);
+});
+
+
+autoUpdater.on('update-downloaded', (info) => {
+  const result = dialog.showMessageBoxSync({
+    type: 'question',
+    buttons: ['Yeniden Başlat', 'Daha Sonra'],
+    defaultId: 0,
+    message: 'Güncelleme indirildi. Uygulama şimdi yeniden başlatılsın mı?',
+  });
+
+  if (result === 0) {
+    autoUpdater.quitAndInstall(); // Uygulama kapanır ve yeni sürümle yeniden açılır
+  }
+});
+
 
 
 app.whenReady().then(() => {
@@ -424,3 +452,11 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 }) 
+
+
+
+/* package.json içinde version numarasını artır,
+
+Tekrar npm run build,
+
+Yeni release oluştur ve dosyaları yükle. */
