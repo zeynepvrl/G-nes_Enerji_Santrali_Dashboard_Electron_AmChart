@@ -1,6 +1,6 @@
 {
   "name": "energy-dashboard",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Energy Management Dashboard",
   "main": "main.js",
   "scripts": {
@@ -22,6 +22,7 @@
     "electron-updater": "^6.6.2",
     "mqtt": "^4.3.7",
     "mssql": "^11.0.1",
+    "node-cron": "^4.1.0",
     "pg": "^8.15.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -46,6 +47,7 @@
   "build": {
     "appId": "com.energy.dashboard",
     "productName": "EnergyDashboard",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },

@@ -30,6 +30,7 @@ const MainLayout: React.FC = () => {
           <Route path="/" element={<Overview />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<Settings />} />
+          
         </Routes>
       </div>
     </>

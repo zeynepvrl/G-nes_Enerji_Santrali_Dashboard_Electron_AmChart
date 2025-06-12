@@ -7,23 +7,18 @@ const isDev = process.argv.includes('--dev')
 const { autoUpdater } = require('electron-updater')
 const { dialog } = require('electron');
 const log = require('electron-log');
-
+const cron = require('node-cron');
 
 let mainWindow;
 let dbPool;
 let mqttClient;
 let currentSubscribedTopic = null;
 
-
-
-
 // Güncelleme loglarını yazdırmak için
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
-
 // Hangi kanal kullanılacak (opsiyonel)
 autoUpdater.channel = 'latest';
-
 
 //const MAX_DB_RETRIES = 5; // Maksimum deneme sayısı
 const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)
@@ -144,6 +139,75 @@ function setupDatabase() {
   attemptInitialConnection();
 }
 
+let facilityPool;
+
+function setupFacilityDatabase() {
+  facilityPool = new Pool({
+    user: 'zeynep',
+    host: '10.10.30.31',
+    database: 'facility_info', // 🔥 Doğru veritabanı
+    password: 'zeynep421',
+    port: 5432,
+  });
+
+  facilityPool.on('error', (err) => {
+    console.error('❌ facility_info bağlantı hatası:', err.message);
+  });
+
+  facilityPool.connect()
+    .then(() => console.log('✅ facility_info bağlantısı başarılı'))
+    .catch(err => console.error('❌ facility_info bağlantısı başarısız:', err.message));
+}
+
+ipcMain.handle('get-limits', async () => {
+  if (!facilityPool) {
+    console.error("⚠ facility_info bağlantısı yok.");
+    return [];
+  }
+
+  try {
+    const result = await facilityPool.query('SELECT name, limit_value FROM limits');
+    return result.rows;
+  } catch (error) {
+    console.error("❌ facility_info limits sorgusu hatası:", error.message);
+    return [];
+  }
+});
+
+ipcMain.handle('update-limit', async (event, name, newLimit) => {
+  if (!facilityPool) {
+    console.error("⚠ facility_info bağlantısı yok.");
+    return { success: false, error: "Veritabanı bağlantısı yok" };
+  }
+
+  try {
+    await facilityPool.query(
+      `UPDATE limits SET limit_value = $1 WHERE name = $2`,
+      [newLimit, name]
+    );
+    console.log(`✅ Limit güncellendi: ${name} => ${newLimit}`);
+    return { success: true };
+  } catch (err) {
+    console.error("❌ LIMIT güncelleme hatası:", err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// Örnek: Her gün saat 00 00'de çalışsın
+cron.schedule('0 0 * * *', async () => {
+  console.log("🕒 ENERGY tablosu silme denemesi - zamanlayıcı çalıştı");
+  if (!globalPool) {
+    console.error("❌ MSSQL bağlantısı yok. ENERGY tablosu silinemedi.");
+    return;
+  }
+
+  try {
+    await globalPool.request().query(`DELETE FROM dbo.ENERGY`);
+    console.log("✅ ENERGY tablosu test amacıyla başarıyla silindi.");
+  } catch (err) {
+    console.error("❌ ENERGY tablosu silinirken hata:", err.message);
+  }
+});
 
 // Tablo isimlerini veya son kayıtları getiren IPC handler
 ipcMain.handle('get-tables', async (event, dbName, tableName, limit, startTime, endTime) => {
@@ -331,9 +395,7 @@ ipcMain.handle('subscribe-mqtt', async (event, topic) => {
   });
 });
 
-
 let globalPool; // 🌐 Bağlantı havuzu
-
 
 async function initSqlConnection() {
   if (!globalPool) {
@@ -346,12 +408,10 @@ async function initSqlConnection() {
   }
 }
 
-
 app.whenReady().then(async () => {
   await initSqlConnection();
   // diğer başlangıç fonksiyonları
 });
-
 
 ipcMain.handle('get-mssql-tables', async () => {
   if (!globalPool) {
@@ -378,7 +438,6 @@ ipcMain.handle('get-mssql-tables', async () => {
       `);
 
     const measurements = result.recordset.map(row => ({
-      tableName: row.NAME,
       name: row.NAME,
       WERT: Math.abs(Number(row.WERT)),
       DATUMZEIT: row.DATUMZEIT
@@ -393,8 +452,6 @@ ipcMain.handle('get-mssql-tables', async () => {
   }
 });
 
-
-
 autoUpdater.on('update-available', (info) => {
   console.log('Yeni güncelleme mevcut:', info.version);
   dialog.showMessageBox({
@@ -404,7 +461,6 @@ autoUpdater.on('update-available', (info) => {
   });
 });
 
-
 autoUpdater.on('error', (err) => {
   console.error('Güncelleme sırasında hata:', err);
 });
@@ -412,7 +468,6 @@ autoUpdater.on('error', (err) => {
 autoUpdater.on('download-progress', (progressObj) => {
   console.log(`İndirilen: ${progressObj.percent.toFixed(2)}%`);
 });
-
 
 autoUpdater.on('update-downloaded', (info) => {
   const result = dialog.showMessageBoxSync({
@@ -427,13 +482,11 @@ autoUpdater.on('update-downloaded', (info) => {
   }
 });
 
-
-
 app.whenReady().then(() => {
   createWindow()
   setupMqtt()
   setupDatabase()
-
+  setupFacilityDatabase(); 
   autoUpdater.checkForUpdatesAndNotify();           //Kullanıcı uygulamayı açtığında güncelleme var mı diye kontrol eder ve varsa indirip yükler.
 
   app.on('activate', () => {
@@ -452,8 +505,6 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 }) 
-
-
 
 /* package.json içinde version numarasını artır,
 
