@@ -583,28 +583,28 @@
           "index": 2
         },
         {
-          "name": "h02_meas_q1",
+          "name": "q1",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 3
         },
         {
-          "name": "h02_meas_q3",
+          "name": "q3",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 4
         },
         {
-          "name": "h02_meas_q4",
+          "name": "q4",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 5
         },
         {
-          "name": "h02_meas_q2",
+          "name": "q2",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
@@ -674,14 +674,14 @@
           "index": 15
         },
         {
-          "name": "h02_meas_p",
+          "name": "p",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 16
         },
         {
-          "name": "h02_meas_q",
+          "name": "q",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
@@ -695,14 +695,14 @@
           "index": 18
         },
         {
-          "name": "h02_meas_wp_imp",
+          "name": "wp_imp",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 19
         },
         {
-          "name": "h02_meas_wp_exp",
+          "name": "wp_exp",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
@@ -8942,28 +8942,28 @@
           "index": 2
         },
         {
-          "name": "h02_meas_q1",
+          "name": "q1",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 3
         },
         {
-          "name": "h02_meas_q3",
+          "name": "q3",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 4
         },
         {
-          "name": "h02_meas_q4",
+          "name": "q4",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 5
         },
         {
-          "name": "h02_meas_q2",
+          "name": "q2",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
@@ -9033,14 +9033,14 @@
           "index": 15
         },
         {
-          "name": "h02_meas_p",
+          "name": "p",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 16
         },
         {
-          "name": "h02_meas_q",
+          "name": "q",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
@@ -9054,14 +9054,14 @@
           "index": 18
         },
         {
-          "name": "h02_meas_wp_imp",
+          "name": "wp_imp",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
           "index": 19
         },
         {
-          "name": "h02_meas_wp_exp",
+          "name": "wp_exp",
           "type": "float",
           "multiplier": 1,
           "aggregation": "",
