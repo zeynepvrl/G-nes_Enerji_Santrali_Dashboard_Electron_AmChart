@@ -3,179 +3,210 @@ import './Alarms.css';
 import alarmSound from '../../assets/fire_alarm.mp3';
 
 interface Measurement {
-    tableName: string;
     name: string;
     WERT: number;
     DATUMZEIT: string;
 }
-
+interface Limit {
+    name: string;
+    limit_value: number;
+}
 declare global {
     interface Window {
         electronAPI: {
             getMssqlTables: () => Promise<Measurement[]>;
+            getLimits: () => Promise<Limit[]>;
+            updateLimit: (name: string, newLimit: number) => Promise<{ success: boolean; error?: string }>;
         };
     }
 }
-
-const defaultLimits: Record<string, number> = {
-    'Konya.Eforges6.RTU.H02.Meas.P_TC_SQL': 950,
-    'Konya.Espeges3.RTU.H02.Meas.P_TC_SQL': 950,
-    'Konya.Worldmedicine.RTU.H02.Meas.P_TC_SQL': 950,
-};
-
 interface AlarmsProps {
     visible?: boolean;
 }
 
 const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     const [measurements, setMeasurements] = useState<Measurement[]>([]);
+    const [limits, setLimits] = useState<Record<string, number>>({});
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
-    const [gesLimits, setGesLimits] = useState<Record<string, number>>(() => {
-        const saved = localStorage.getItem('gesLimits');
-        return saved ? JSON.parse(saved) : defaultLimits;
-    });
     const [editingGES, setEditingGES] = useState<string | null>(null);
     const [newLimitValue, setNewLimitValue] = useState<string>('');
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    const fetchMeasurements = async () => {
+    const fetchData = async () => {
         try {
-            const result = await window.electronAPI.getMssqlTables();
-            setMeasurements(result);
+            const [measurementsRes, limitsRes] = await Promise.all([
+                window.electronAPI.getMssqlTables(),
+                window.electronAPI.getLimits()
+            ]);
+
+            const limitsMap: Record<string, number> = {};
+            limitsRes.forEach(limit => {
+                limitsMap[limit.name] = limit.limit_value;
+            });
+
+
+            setLimits(limitsMap);
+            setMeasurements(measurementsRes);
         } catch (err) {
-            console.error("Database connection error:", err);
-            setError(err instanceof Error ? err.message : "An error occurred while connecting to the database");
+            console.error("Veri çekme hatası:", err);
+            setError(err instanceof Error ? err.message : "Veri çekilirken bir hata oluştu");
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchMeasurements();
-        const interval = setInterval(fetchMeasurements, 10000);
+        fetchData();
+        const interval = setInterval(fetchData, 10000);
         return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
-        const anyAlarm = measurements.some(measurement => {
-            const limit = gesLimits[measurement.name] ?? 950;
-            return measurement.WERT > limit;
-        });
+        const anyAlarm = measurements.some(m => m.WERT > (limits[m.name] ?? 200));
         if (anyAlarm && audioRef.current) {
+            console.log("alarm çalındı");
             audioRef.current.currentTime = 0;
             audioRef.current.play();
         }
-    }, [measurements, gesLimits]);
+    }, [measurements, limits]);
 
-    const updateLimit = (ges: string, newLimit: number) => {
-        const updated = { ...gesLimits, [ges]: newLimit };
-        setGesLimits(updated);
-        localStorage.setItem('gesLimits', JSON.stringify(updated));
-    };
-
-    function formatDateUTC(dateString: string): string {
-        const date = new Date(dateString);
-        return new Intl.DateTimeFormat('tr-TR', {
-            timeZone: 'UTC',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-        }).format(date);
-    }
-
-    function getGesName(name: string): string {
-        // NAME formatından GES adını çıkar
-        const parts = name.split('.');
-        if (parts.length >= 2) {
-            return parts[1]; // GES adı genellikle ikinci parçada
+    const updateLimit = async (name: string, newLimit: number) => {
+        const updated = { ...limits, [name]: newLimit };
+        setLimits(updated);
+        try {
+            const response = await window.electronAPI.updateLimit(name, newLimit);
+            if (!response.success) {
+                setError(response.error || 'Limit güncelleme başarısız oldu.');
+            }
+        } catch (err) {
+            setError('Limit güncellenirken bir hata oluştu.');
         }
-        return name;
-    }
+    };
+    
+
+    const getGesName = (name: string) => {
+        const parts = name.split('.');
+        return parts.length >= 2 ? parts[1] : name;
+    };
 
     if (!visible) return <audio ref={audioRef} src={alarmSound} preload="auto" />;
 
     return (
         <div className="alarms-container">
-            <h1>Alarmlar</h1>
             <div className="alarms-content">
                 {loading ? (
-                    <div>Loading...</div>
+                    <div className="loading">Yükleniyor...</div>
                 ) : error ? (
-                    <div className="error-message">Error: {error}</div>
+                    <div className="error-message">Hata: {error}</div>
                 ) : (
                     <div>
-                        <h2>Ölçüm Değerleri</h2>
-                        <div>
+                        <h2>
+                            Ölçüm Değerleri
+                            <span style={{ fontSize: '1rem', color: '#7f8c8d' }}>({measurements.length} adet)</span>
+                            <button
+                                className="test-sound-btn"
+                                onClick={() => {
+                                    if (audioRef.current) {
+                                        audioRef.current.currentTime = 0;
+                                        audioRef.current.play()
+                                            .then(() => {
+                                                setTimeout(() => {
+                                                    audioRef.current && audioRef.current.pause();
+                                                    audioRef.current && (audioRef.current.currentTime = 0);
+                                                }, 2000);
+                                            })
+                                            .catch(err => console.error('Ses çalma hatası:', err));
+                                    }
+                                }}
+                            >
+                                🔊 Sesi Test Et
+                            </button>
+                        </h2>
+                        <div className="alarms-grid">
                             {measurements
-                                .filter(measurement => {
-                                    const limit = gesLimits[measurement.name] ?? 950;
-                                    return measurement.WERT > limit;
+                                .sort((a, b) => {
+                                    const gesNameA = getGesName(a.name);
+                                    const gesNameB = getGesName(b.name);
+                                    return gesNameA.localeCompare(gesNameB, 'tr');
                                 })
-                                .map((measurement, index) => {
-                                const limit = gesLimits[measurement.name] ?? 950;
-                                const isAlarm = measurement.WERT > limit;
-                                const gesName = getGesName(measurement.name);
-
-                                return (
-                                    <div
-                                        key={index}
-                                        className={`measurement-list-item measurement-row${isAlarm ? ' alarm-blink' : ''}`}
-                                    >
-                                        <div className="measurement-row">
-                                            <div className="ges-title">{gesName}</div>
-                                            <div className="ges-detail">
-                                                <span><strong>Ölçüm:</strong> {measurement.name}</span>
-                                                <span><strong>Değer:</strong> {measurement.WERT}</span>
-                                                <span><strong>Zaman:</strong> {formatDateUTC(measurement.DATUMZEIT)}</span>
-                                                <span>
-                                                    <strong>Eşik:</strong> {limit}
-                                                    {editingGES === measurement.name ? (
-                                                        <>
+                                .map((m, index) => {
+                                    const limit = limits[m.name] ?? 200;
+                                    const isAlarm = m.WERT > limit;
+                                    const gesName = getGesName(m.name);
+                                    const datum=new Date(m.DATUMZEIT);
+                                    const now = Date.now();
+                                    const isDataOutage =(now-datum.getTime()) > 2*60*1000;
+                      
+                                    return (
+                                        <div
+                                            key={m.name}
+                                            className={`measurement-list-item${isAlarm ? ' alarm-blink' : isDataOutage ? ' data-outage opacity-50' : ''}`}
+                                        >
+                                            <div className="measurement-row">
+                                                <div className="ges-title">{gesName}</div>
+                                                <div className="info-table">
+                                                    <div className="info-table-row">
+                                                        <span className="label">Değer</span>
+                                                        <span className="value">{m.WERT.toFixed(2)}</span>
+                                                    </div>
+                                                    <div className="info-table-row">
+                                                        <span className="label">Zaman</span>
+                                                        <span className="value">{m.DATUMZEIT}</span>
+                                                    </div>
+                                                    <div className={`info-table-row${isAlarm ? ' alarm-row' : ''}`}>
+                                                        <span className="label">Eşik Değeri</span>
+                                                        <span className="value">
+                                                            {limit}
+                                                            <button
+                                                                className="update-threshold-btn edit icon-btn"
+                                                                style={{ marginLeft: 8 }}
+                                                                onClick={() => {
+                                                                    setEditingGES(m.name);
+                                                                    setNewLimitValue(String(limit));
+                                                                }}
+                                                                aria-label="Düzenle"
+                                                            >
+                                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b0b7c3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                                                            </button>
+                                                        </span>
+                                                    </div>
+                                                    {editingGES === m.name && (
+                                                        <div className="edit-row">
                                                             <input
                                                                 type="number"
                                                                 value={newLimitValue}
                                                                 onChange={e => setNewLimitValue(e.target.value)}
-                                                                style={{ width: 70, marginLeft: 8 }}
                                                             />
                                                             <button
                                                                 className="update-threshold-btn"
                                                                 onClick={() => {
                                                                     if (newLimitValue !== '' && !isNaN(Number(newLimitValue))) {
-                                                                        updateLimit(measurement.name, Number(newLimitValue));
+                                                                        updateLimit(m.name, Number(newLimitValue));
                                                                         setEditingGES(null);
                                                                         setNewLimitValue('');
                                                                     }
                                                                 }}
-                                                                style={{ marginLeft: 8 }}
                                                             >Kaydet</button>
                                                             <button
-                                                                style={{ marginLeft: 4 }}
+                                                                className="update-threshold-btn"
+                                                                style={{ backgroundColor: '#95a5a6' }}
                                                                 onClick={() => {
                                                                     setEditingGES(null);
                                                                     setNewLimitValue('');
                                                                 }}
                                                             >İptal</button>
-                                                        </>
-                                                    ) : (
-                                                        <button
-                                                            className="update-threshold-btn edit"
-                                                            style={{ marginLeft: 8 }}
-                                                            onClick={() => {
-                                                                setEditingGES(measurement.name);
-                                                                setNewLimitValue(String(limit));
-                                                            }}
-                                                        >Düzenle</button>
+                                                        </div>
                                                     )}
-                                                </span>
+                                                    {/* <div className="info-table-row">
+                                                        <span className="label">Ölçüm</span>
+                                                        <span className="value measure-name">{m.name}</span>
+                                                    </div> */}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
                         </div>
                     </div>
                 )}

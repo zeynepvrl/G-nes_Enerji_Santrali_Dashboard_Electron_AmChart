@@ -114,6 +114,8 @@ function attemptInitialConnection() {
   });
 }
 
+
+
 // PostgreSQL bağlantı havuzu oluşturma
 function setupDatabase() {
   dbPool = new Pool({
@@ -426,7 +428,7 @@ ipcMain.handle('get-mssql-tables', async () => {
         SELECT
           vars.NAME,
           latest.WERT,
-          latest.DATUMZEIT
+          CONVERT(VARCHAR(19), latest.DATUMZEIT, 120) AS DATUMZEIT
         FROM
           (SELECT DISTINCT NAME FROM dbo.ENERGY) AS vars
           OUTER APPLY (
@@ -436,13 +438,13 @@ ipcMain.handle('get-mssql-tables', async () => {
             ORDER BY DATUMZEIT DESC
           ) AS latest
       `);
-
+      
+   
     const measurements = result.recordset.map(row => ({
       name: row.NAME,
       WERT: Math.abs(Number(row.WERT)),
-      DATUMZEIT: row.DATUMZEIT
+      DATUMZEIT:row.DATUMZEIT,
     }));
-
     console.log("measurements", measurements.length);
     return measurements;
 
