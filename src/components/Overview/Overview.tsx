@@ -6,6 +6,7 @@ import am5themes_Animated from '@amcharts/amcharts5/themes/Animated';
 import './Overview.css';
 import deviceConfigs from '../../config/deviceConfigs.json';
 import NestedDropdown from './mainSeriesNestedDropDown';
+import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
 // Type definitions for deviceConfigs
 type DataField = {
   name: string;
@@ -22,12 +23,17 @@ type DeviceTypeConfig = {
 type GesConfig = {
   [key: string]: DeviceTypeConfig;
 };
-type DeviceConfigs = {
-  [key: string]: GesConfig;
-};
+
 type VariableConfig = {
   name: string;
   index: number;
+};
+
+type ComparisonSelection = {
+  il: string;
+  ges: string;
+  arac: string;
+  variable: string;
 };
 
 declare global {
@@ -60,6 +66,14 @@ const Overview: React.FC = () => {
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
   const lastLoadTimeRef = useRef(0);
+  
+  const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
+  const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
+  const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
+  const [comparisonSelections, setComparisonSelections] = useState<Record<string, string[]>>({});
+
+
+  
 
   function capitalize(str: string) {
     if (!str) return '';
@@ -434,6 +448,7 @@ const Overview: React.FC = () => {
     // Set main value series
     stockChart.set("stockSeries", valueSeries);
 
+    
     // Add legend
     const valueLegend = mainPanel.plotContainer.children.push(
       am5stock.StockLegend.new(root, {
@@ -831,6 +846,21 @@ const Overview: React.FC = () => {
     };
   }, [timeIntervalRef.current]);
 
+
+ const getSelectedVariables = (il: string, ges: string, arac: string) => {
+  return comparisonSelections[`${il}/${ges}/${arac}`] || [];
+};
+const handleComparisonSelect = (il: string, ges: string, arac: string) => {
+  setSelectedComparisonIl(il);
+  setSelectedComparisonGes(ges);
+  setSelectedComparisonArac(arac);
+};
+ 
+
+
+useEffect(() => {
+  console.log("comparisonSelections",comparisonSelections);
+}, [comparisonSelections]);
   return (
     <div className="overview-container">
       <div className="selection-container">
@@ -849,45 +879,31 @@ const Overview: React.FC = () => {
           selectedArac={selectedArac}
           selectedVariable={selectedVariable}
         />
+        <ComparisonSeriesNestedDropdown
+          dropdownData={dropdownData}
+          onSelect={(il, ges, arac, variables) => {
+            // Sadece değişken seçildiğinde (variables array'i boş değilse) tetikle
+            if (variables.length > 0) {
+              setComparisonSelections(prev => ({
+                ...prev,
+                [`${il}/${ges}/${arac}`]: variables
+              }));
+            } else {
+              // İl, GES veya araç seçildiğinde sadece state'i güncelle
+              handleComparisonSelect(il, ges, arac);
+            }
+          }}
+          selectedIl={selectedComparisonIl}
+          selectedGes={selectedComparisonGes}
+          selectedArac={selectedComparisonArac}
+          selectedVariables={getSelectedVariables(selectedComparisonIl, selectedComparisonGes, selectedComparisonArac)}
+        />
       </div>
-     
       <div id="chartcontrols" className="chart-controls"></div>
       <div id="chartdiv" className="chart-container"></div>
     </div>
   );
 };
 
-// Helper function to generate sample data
-function generateData() {
-  const data = [];
-  let value = 100;
-  let open = value;
-  let low = value * 0.95;
-  let high = value * 1.05;
-  let volume = 1000;
-  
-  const currentDate = new Date();
-  currentDate.setHours(0, 0, 0, 0);
+export default Overview;
 
-  for (let i = 0; i < 100; i++) {
-    value = Math.round((value + Math.random() * 20 - 10) * 100) / 100;
-    open = Math.round((open + Math.random() * 20 - 10) * 100) / 100;
-    high = Math.max(value, open) + Math.random() * 10;
-    low = Math.min(value, open) - Math.random() * 10;
-    volume = Math.round(volume + Math.random() * 1000 - 500);
-
-    data.push({
-      timestamp: new Date(currentDate.getTime() + i * 60000).getTime(),
-      value: value,
-      open: open,
-      high: high,
-      low: low,
-      close: value,
-      volume: Math.max(100, volume)
-    });
-  }
-
-  return data;
-}
-
-export default Overview; 
