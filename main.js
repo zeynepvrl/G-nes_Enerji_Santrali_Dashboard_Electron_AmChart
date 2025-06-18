@@ -85,6 +85,7 @@ function setupMqtt() {
   });
 }
 
+//postgre
 function attemptInitialConnection() {
   if (!dbPool) {
     console.error("dbPool başlatılmamış. attemptInitialConnection çağrılmadan önce setupDatabase içinde başlatılmalı.");
@@ -113,8 +114,6 @@ function attemptInitialConnection() {
     // }
   });
 }
-
-
 
 // PostgreSQL bağlantı havuzu oluşturma
 function setupDatabase() {
@@ -355,45 +354,38 @@ ipcMain.handle('get-all-tables', async () => {
   }
 });
 
-// Dinamik subscribe için IPC handler
+let subscribedTopics = new Set();
+
 ipcMain.handle('subscribe-mqtt', async (event, topic) => {
-  if (!mqttClient) return;
-  
+  if (!mqttClient || subscribedTopics.has(topic)) return;
+
   return new Promise((resolve, reject) => {
-    if (currentSubscribedTopic) {
-      mqttClient.unsubscribe(currentSubscribedTopic, (err) => {
-        if (err) {
-          console.error('MQTT unsubscribe error:', err);
-          reject(err);
-          return;
-        }
-        console.log('MQTT unsubscribed:', currentSubscribedTopic);
-        
-        // Unsubscribe başarılı olduktan sonra yeni topic'e subscribe ol
-        currentSubscribedTopic = topic;
-        mqttClient.subscribe(topic, (err) => {
-          if (err) {
-            console.error('MQTT subscribe error:', err);
-            reject(err);
-            return;
-          }
-          console.log('MQTT subscribed:', topic);
-          resolve();
-        });
-      });
-    } else {
-      // Eğer önceden subscribe olunmuş topic yoksa direkt yeni topic'e subscribe ol
-      currentSubscribedTopic = topic;
-      mqttClient.subscribe(topic, (err) => {
-        if (err) {
-          console.error('MQTT subscribe error:', err);
-          reject(err);
-          return;
-        }
-        console.log('MQTT subscribed:', topic);
-        resolve();
-      });
-    }
+    mqttClient.subscribe(topic, (err) => {
+      if (err) {
+        console.error('MQTT subscribe error:', err);
+        reject(err);
+        return;
+      }
+      subscribedTopics.add(topic);
+      console.log('MQTT subscribed:', topic);
+      resolve();
+    });
+  });
+});
+
+ipcMain.handle('unsubscribe-mqtt', async (event, topic) => {
+  if (!mqttClient || !subscribedTopics.has(topic)) return;
+  return new Promise((resolve, reject) => {
+    mqttClient.unsubscribe(topic, (err) => {
+      if (err) {
+        console.error('MQTT unsubscribe error:', err);
+        reject(err);
+        return;
+      }
+      subscribedTopics.delete(topic);
+      console.log('MQTT unsubscribed:', topic);
+      resolve();
+    });
   });
 });
 

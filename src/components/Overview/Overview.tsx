@@ -8,33 +8,13 @@ import deviceConfigs from '../../config/deviceConfigs.json';
 import NestedDropdown from './mainSeriesNestedDropDown';
 import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
 // Type definitions for deviceConfigs
-type DataField = {
-  name: string;
-  type: string;
-  multiplier: number;
-  aggregation: string;
-  index: number;
-};
-type DeviceTypeConfig = {
-  inverter?: DataField[];
-  analizor?: DataField[];
-  rtu?: DataField[];
-};
-type GesConfig = {
-  [key: string]: DeviceTypeConfig;
-};
+
 
 type VariableConfig = {
   name: string;
   index: number;
 };
 
-type ComparisonSelection = {
-  il: string;
-  ges: string;
-  arac: string;
-  variable: string;
-};
 
 declare global {
   interface Window {
@@ -43,6 +23,7 @@ declare global {
       onMqttData: (callback: (data: string, topic?: string) => void) => void;
       getAllTables: () => Promise<{ [dbName: string]: string[] }>;
       subscribeMqtt: (topic: string) => void;
+      unsubscribeMqtt: (topic: string) => void;
     };
   }
 }
@@ -51,6 +32,7 @@ const Overview: React.FC = () => {
   const chartRef = useRef<am5stock.StockChart | null>(null);
   const rootRef = useRef<am5.Root | null>(null);
   const dateAxisRef = useRef<am5xy.GaplessDateAxis<am5xy.AxisRenderer> | null>(null);
+  const valueAxisRef = useRef<am5xy.ValueAxis<am5xy.AxisRenderer> | null>(null);
   const [selectedIl, setSelectedIl] = useState('');
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
@@ -71,10 +53,10 @@ const Overview: React.FC = () => {
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
   const [comparisonSelections, setComparisonSelections] = useState<Record<string, string[]>>({});
-
-
-  
-
+  const comparisonSeriesRefs = useRef<am5xy.LineSeries[]>([]);
+  const comparisonUnsubscribeRefs = useRef<(() => void)[]>([]);
+  const prevComparisonSelections = useRef<Record<string, string[]>>({});
+ 
   function capitalize(str: string) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -136,7 +118,6 @@ const Overview: React.FC = () => {
     if (selectedArac === "" || selectedVariable === "") return;
    
     const dbName = `${selectedIl}_${selectedGes}`;
-    console.log("dropdownData", dropdownData)
     const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
 
     if (!variableConfig) return;
@@ -265,7 +246,6 @@ const Overview: React.FC = () => {
         const variableIndex = variableConfig.index;
         if (variableIndex === undefined) return;
         const value = parsedData[variableIndex + 1];
-        console.log("value", value)
         if (value === undefined) return;
 
         const timestamp = new Date(parsedData[0]).getTime();
@@ -423,7 +403,8 @@ const Overview: React.FC = () => {
         extraTooltipPrecision: 2
       })
     );
-    
+  
+    valueAxisRef.current = valueAxis;
     // Create series
     const valueSeries = mainPanel.series.push(
       am5xy.CandlestickSeries.new(root, {
@@ -448,7 +429,6 @@ const Overview: React.FC = () => {
     // Set main value series
     stockChart.set("stockSeries", valueSeries);
 
-    
     // Add legend
     const valueLegend = mainPanel.plotContainer.children.push(
       am5stock.StockLegend.new(root, {
@@ -711,9 +691,127 @@ const Overview: React.FC = () => {
     }
   }, [selectedVariable]);
 
+  const addComparisonLine = async (key: string, variableName: string) => {
+    if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) return;
+   
+    const chart = chartRef.current;
+    const mainPanel = chart.panels.getIndex(0);
+    if (!mainPanel) return;
+
+    const [il, ges, arac] = key.split('/');
+    const dbName = `${il}_${ges}`;
+    const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
+    console.log("addComparisonLine çalıştı",key, variableName)
+    if (!variableConfig) return;
+
+    const endTime = new Date();
+    const startTime = new Date(endTime.getTime() - 10 * 60 * 60 * 1000); // son 10 saat
+
+    const records = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTime, endTime);
+
+    const lineData = records.map(record => {
+      const value = Number(record[variableName]);
+      const timestamp = new Date(record.timestamp).getTime();
+      return { timestamp, value };
+    }).filter(d => !isNaN(d.value));
+
+    const series = am5xy.LineSeries.new(rootRef.current, {
+      name: `${key}-${variableName}`,
+      valueXField: "timestamp",
+      valueYField: "value",
+      xAxis: dateAxisRef.current,
+      yAxis: valueAxisRef.current,
+      stroke: am5.color("#ffe082"),
+      tooltip: am5.Tooltip.new(rootRef.current, {
+        labelText: `{name}\n[bold]{valueY}[/]`
+      })
+    });
+
+    series.data.setAll(lineData);
+    mainPanel.series.push(series);
+    comparisonSeriesRefs.current.push(series);
+
+    // MQTT canlı veri kısmı
+    const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
+    const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
+    const cihazGrubu = getCihazGrubu(arac);
+    if (!cihazGrubu) return;
+
+    const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
+    await window.electronAPI.subscribeMqtt(topic);
+
+    const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
+      if (incomingTopic?.toLowerCase() === topic.toLowerCase()) {
+        try {
+          const parsed = JSON.parse(data);
+          const variableIndex = variableConfig.index;
+          const value = parsed[variableIndex + 1];
+          const timestamp = new Date(parsed[0]).getTime();
+          if (isNaN(value) || isNaN(timestamp)) return;
+          series.data.push({ timestamp, value });
+        } catch (err) {
+          console.error("MQTT comparison parse error:", err);
+        }
+      }
+    });
+
+    if (typeof unsubscribe === "function") {
+      comparisonUnsubscribeRefs.current.push(unsubscribe);
+    }
+  };
+
+  // Karşılaştırma serilerini yönetmek için useEffect
+  useEffect(() => {
+    // Önceki ve mevcut seçimleri karşılaştır
+    const prevKeys = Object.keys(prevComparisonSelections.current);
+    const currentKeys = Object.keys(comparisonSelections);
+
+    // Kaldırılan serileri temizle
+    const removedKeys = prevKeys.filter(key => !currentKeys.includes(key));
+    removedKeys.forEach(key => {
+      const seriesToRemove = comparisonSeriesRefs.current.filter(s => s.get("name")?.startsWith(key));
+      seriesToRemove.forEach(series => {
+        series.dispose();
+        comparisonSeriesRefs.current = comparisonSeriesRefs.current.filter(s => s !== series);
+      });       
+      // MQTT aboneliklerini kaldır
+      const [il, ges, arac] = key.split('/');
+      const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
+      const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
+      const cihazGrubu = getCihazGrubu(arac);
+      if (cihazGrubu) {
+        const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
+        window.electronAPI.unsubscribeMqtt(topic);
+      }
+    });
+
+    // **YENİ EKLENEN** serileri işle
+    const addedKeys = currentKeys.filter(key => !prevKeys.includes(key));
+    addedKeys.forEach(key => {
+      const variables = comparisonSelections[key];
+      variables.forEach(variableName => {
+        addComparisonLine(key, variableName);
+      });
+    });
+
+    // Referansı güncelle
+    prevComparisonSelections.current = { ...comparisonSelections };
+
+    // Cleanup sadece UNMOUNT'ta çalışsın
+    return () => {
+      if (Object.keys(comparisonSelections).length === 0) {
+        comparisonSeriesRefs.current.forEach(series => series.dispose());
+        comparisonSeriesRefs.current = [];
+        comparisonUnsubscribeRefs.current.forEach(unsub => {
+          if (typeof unsub === 'function') unsub();
+        });
+        comparisonUnsubscribeRefs.current = [];
+      }
+    };
+  }, [comparisonSelections]);
+
   // DateAxis için event listener
   useEffect(() => {
-    console.log("dateAxisRef.current useeffect çağrıldı")
     if (!dateAxisRef.current && !hasZoomedInitially) {
       return;
     }
@@ -767,9 +865,8 @@ const Overview: React.FC = () => {
         hours.add(date.toISOString());
       }
     });
-    console.log("hours",hours);
 
-    console.log("timeIntervalRef.current useeffect",timeIntervalRef.current);
+   
     if (!selectedVariable || !chartRef.current) return;
     
     const chart = chartRef.current;
@@ -792,7 +889,6 @@ const Overview: React.FC = () => {
 
     // Seçilen zaman aralığına göre gruplama
     const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-    console.log("dataBuffer-----------tiemseries",dataBuffer);
     dataBuffer.forEach((d: any) => {
       const roundedTime = getRoundedTimestamp(d.timestamp);
       if (!grouped.has(roundedTime)) {
@@ -847,20 +943,8 @@ const Overview: React.FC = () => {
   }, [timeIntervalRef.current]);
 
 
- const getSelectedVariables = (il: string, ges: string, arac: string) => {
-  return comparisonSelections[`${il}/${ges}/${arac}`] || [];
-};
-const handleComparisonSelect = (il: string, ges: string, arac: string) => {
-  setSelectedComparisonIl(il);
-  setSelectedComparisonGes(ges);
-  setSelectedComparisonArac(arac);
-};
- 
+  
 
-
-useEffect(() => {
-  console.log("comparisonSelections",comparisonSelections);
-}, [comparisonSelections]);
   return (
     <div className="overview-container">
       <div className="selection-container">
@@ -882,21 +966,30 @@ useEffect(() => {
         <ComparisonSeriesNestedDropdown
           dropdownData={dropdownData}
           onSelect={(il, ges, arac, variables) => {
-            // Sadece değişken seçildiğinde (variables array'i boş değilse) tetikle
-            if (variables.length > 0) {
-              setComparisonSelections(prev => ({
-                ...prev,
-                [`${il}/${ges}/${arac}`]: variables
-              }));
-            } else {
-              // İl, GES veya araç seçildiğinde sadece state'i güncelle
-              handleComparisonSelect(il, ges, arac);
-            }
+            // UI için il, ges, arac seçimlerini güncelle
+            if (il) setSelectedComparisonIl(il);
+            if (ges) setSelectedComparisonGes(ges);
+            if (arac) setSelectedComparisonArac(arac);
+
+            // Değişken seçimlerini güncelle
+     
+            setComparisonSelections(prev => {
+              const updated = { ...prev };
+              const key = `${il}/${ges}/${arac}`;
+              if (variables.length > 0) {
+                updated[key] = variables;
+              } else {
+                // Hiç değişken seçili değilse anahtarı tamamen sil
+                delete updated[key];
+              }
+              return updated;
+            });
+            
           }}
           selectedIl={selectedComparisonIl}
           selectedGes={selectedComparisonGes}
           selectedArac={selectedComparisonArac}
-          selectedVariables={getSelectedVariables(selectedComparisonIl, selectedComparisonGes, selectedComparisonArac)}
+          selectedVariables={comparisonSelections}
         />
       </div>
       <div id="chartcontrols" className="chart-controls"></div>

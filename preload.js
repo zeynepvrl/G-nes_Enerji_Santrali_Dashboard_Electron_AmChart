@@ -12,7 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTablesHistory: (dbName, tableName, limit, startTime, endTime) => ipcRenderer.invoke('get-tables', dbName, tableName, limit, startTime, endTime),
   getAllTables: () => ipcRenderer.invoke('get-all-tables'),
   subscribeMqtt: (topic) => ipcRenderer.invoke('subscribe-mqtt', topic),
-  getMssqlTables: () => ipcRenderer.invoke('get-mssql-tables')
+  getMssqlTables: () => ipcRenderer.invoke('get-mssql-tables'),
+  unsubscribeMqtt: (topic) => ipcRenderer.invoke('unsubscribe-mqtt', topic)
 }); 
 
 
