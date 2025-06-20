@@ -34,6 +34,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     const fetchData = async () => {
+        
         try {
             const [measurementsRes, limitsRes] = await Promise.all([
                 window.electronAPI.getMssqlTables(),

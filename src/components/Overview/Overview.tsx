@@ -7,24 +7,24 @@ import './Overview.css';
 import deviceConfigs from '../../config/deviceConfigs.json';
 import NestedDropdown from './mainSeriesNestedDropDown';
 import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
-// Type definitions for deviceConfigs
+import {
+  ChartDataPoint,
+  CandleData,
+  TimeInterval,
+  ChartType,
+  ChartDataRequest,
+  VariableConfig,
+  DeviceType,
+  DeviceGroup,
+  DropdownData,
+  ProcessedMqttData,
+  ElectronAPI
+} from '../../types';
 
-
-type VariableConfig = {
-  name: string;
-  index: number;
-};
-
-
+// Global window interface extension
 declare global {
   interface Window {
-    electronAPI: {
-      getTablesHistory: (dbName: string, tableName?: string, limit?: number, startTime?: Date, endTime?: Date) => Promise<any[]>;
-      onMqttData: (callback: (data: string, topic?: string) => void) => void;
-      getAllTables: () => Promise<{ [dbName: string]: string[] }>;
-      subscribeMqtt: (topic: string) => void;
-      unsubscribeMqtt: (topic: string) => void;
-    };
+    electronAPI: ElectronAPI;
   }
 }
 
@@ -37,18 +37,13 @@ const Overview: React.FC = () => {
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
   const [selectedVariable, setSelectedVariable] = useState('');
-  const [dropdownData, setDropdownData] = useState<Record<string, Record<string, Record<string, VariableConfig[]>>>>({});
-  const timeIntervalRef = useRef<{
-    timeUnit: "minute" | "hour";
-    count: number;
-  }>({ timeUnit: "minute", count: 1 });
-
+  const [dropdownData, setDropdownData] = useState<DropdownData>({});
+  const timeIntervalRef = useRef<TimeInterval>({ timeUnit: "minute", count: 1 });
   // Veri buffer'ları için state'ler
-  const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
+  const [dataBuffer, setDataBuffer] = useState<ChartDataPoint[]>([]);
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
   const lastLoadTimeRef = useRef(0);
-  
   const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
@@ -62,7 +57,7 @@ const Overview: React.FC = () => {
     return str.charAt(0).toUpperCase() + str.slice(1);
   }
   // Tablo adından cihaz grubunu otomatik bul
-  function getCihazGrubu(tablename: string) {
+  function getCihazGrubu(tablename: string): DeviceGroup | '' {
     if (!tablename) return '';
     const lower = tablename.toLowerCase();
     if (lower.startsWith('inv')) return 'inverters';
@@ -72,7 +67,7 @@ const Overview: React.FC = () => {
     return '';
   }
    // Get device type from table name
-   function getDeviceType(tablename: string) {
+   function getDeviceType(tablename: string): DeviceType | '' {
     if (!tablename) return '';
     const lower = tablename.toLowerCase();
     if (lower.startsWith('inv')) return 'inverter';
@@ -82,12 +77,12 @@ const Overview: React.FC = () => {
   }
  
   useEffect(() => {
-    if (!window.electronAPI?.getAllTables) return;
-    window.electronAPI.getAllTables().then((allTables) => {
+    if (!window.electronAPI?.get_all_GESdbs_and_their_tables_for_dropdowns) return;
+    window.electronAPI.get_all_GESdbs_and_their_tables_for_dropdowns().then((allGesdbs) => {
       const data: Record<string, Record<string, Record<string, VariableConfig[]>>> = {};
       const ilSet = new Set<string>();
 
-      Object.keys(allTables).forEach(dbName => {
+      Object.keys(allGesdbs).forEach(dbName => {
         const [il, ...gesArr] = dbName.split('_');
         const ges = gesArr.join('_');
         ilSet.add(il);
@@ -95,7 +90,7 @@ const Overview: React.FC = () => {
         if (!data[il]) data[il] = {};
         if (!data[il][ges]) data[il][ges] = {};
 
-        allTables[dbName].forEach(arac => {
+        allGesdbs[dbName].forEach(arac => {
           let variables: VariableConfig[] = [];
           const deviceType = getDeviceType(arac);
           const config = (deviceConfigs as any)[il]?.[ges]?.[deviceType];
@@ -114,161 +109,156 @@ const Overview: React.FC = () => {
   }, []);
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
+    console.log('🔄 Variable selection changed:', { selectedIl, selectedGes, selectedArac, selectedVariable });
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
     if (selectedArac === "" || selectedVariable === "") return;
    
     const dbName = `${selectedIl}_${selectedGes}`;
     const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
 
-    if (!variableConfig) return;
+    if (!variableConfig) {
+      console.warn('⚠️ Variable config not found:', { selectedVariable, availableVariables: dropdownData[selectedIl][selectedGes][selectedArac] });
+      return;
+    }
+    
+    console.log('📊 Loading historical data for:', { dbName, selectedArac, selectedVariable, variableConfig });
+    
     // Fetch historical data
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10*60*60*1000);
     
     window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime)
-      .then(records => {
+      .then(async (records) => {
+        console.log('📥 Historical data received:', { recordCount: records?.length || 0 });
         if (records && records.length > 0) {
-          const rawData = records
+          const rawData: ChartDataPoint[] = records
             .map(record => {
-              const value = record[selectedVariable];
-              const numValue = Number(value);
               const timestamp = new Date(record.timestamp).getTime();
-              return {
-                timestamp: timestamp,
-                value: numValue
-              };
+              if(selectedVariable === "p"){
+                const value = record[selectedVariable];
+                const numValue = Math.abs(Number(value));
+                return {
+                  timestamp: timestamp,
+                  value: numValue
+                };
+              }
+              else{
+                const value = record[selectedVariable];
+                const numValue = Number(value);
+                return {
+                  timestamp: timestamp,
+                  value: numValue
+                };
+              }
             })
-            .filter((item): item is { timestamp: number; value: number } => item !== null)
+            .filter((item): item is ChartDataPoint => item !== null);
 
+            console.log('📊 Processed raw data:', { dataPoints: rawData.length });
             setDataBuffer(rawData);
           
             if (!rawData || rawData.length === 0) {
-              console.log('rawdata is empty');
+              console.log('⚠️ Raw data is empty');
               return;
             }
         
-            // Zaman aralığına göre timestamp'i yuvarla
-            const getRoundedTimestamp = (timestamp: number) => {
-              const { timeUnit, count } = timeIntervalRef.current;
-              const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-              return Math.floor(timestamp / ms) * ms;
-            };
-        
-            // Seçilen zaman aralığına göre gruplama
-            const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-            
-            rawData.forEach(d => {
-              const roundedTime = getRoundedTimestamp(d.timestamp);
-              if (!grouped.has(roundedTime)) {
-                grouped.set(roundedTime, { values: [], timestamps: [] });
-              }
-              const group = grouped.get(roundedTime)!;
-              group.values.push(d.value);
-              group.timestamps.push(d.timestamp);
-            });
-        
-            // Her zaman aralığı için bir mum oluştur
-            const newCandles = Array.from(grouped.entries())
-              .filter(([_, group]) => group.values.length > 0)
-              .sort(([timeA], [timeB]) => timeA - timeB)
-              .map(([time, group]) => {
-                const values = group.values;
-                if (values.length === 0) return null;
-                
-                const open = values[0];
-                const close = values[values.length - 1];
-                const high = Math.max(...values);
-                const low = Math.min(...values);
-                
-                if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
-                  console.log('Invalid candle values:', { time, open, close, high, low });
-                  return null;
-                }
-                
-                return {
-                  timestamp: time,
-                  open,
-                  high,
-                  low,
-                  close,
-                  volume: values.length
-                };
-              })
-              .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-            if(newCandles.length > 0){
-              let isMounted = true;
-              const chart = chartRef.current;
-              try {
-                if (
-                  chart &&
-                  newCandles.length > 0 &&
-                  rootRef.current &&
-                  typeof chart.get === 'function' &&
-                  !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-                ) {
-                  const valueSeries = chart.get('stockSeries');
-                  const volumeSeries = chart.get('volumeSeries');
-                  if (valueSeries && volumeSeries) {          
-                    valueSeries.data.setAll(newCandles);  
-                    volumeSeries.data.setAll(newCandles);
-                    // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
-                    if (!hasZoomedInitially && newCandles.length > 199) {
-                      valueSeries.events.once("datavalidated", function() {
-                        if (dateAxisRef.current) {
-                          const startIndex = Math.max(0, newCandles.length - 200);
-                          const start = newCandles[startIndex]?.timestamp;
-                          const end = newCandles[newCandles.length - 1]?.timestamp;
-                          if (start && end) {
-                            dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-                            setHasZoomedInitially(true);
+            // Worker kullanarak chart verisi oluştur
+            try {
+              console.log('🔧 Creating chart data with worker...');
+              const chartData = await window.electronAPI.getChartData({
+                data: rawData,
+                timeUnit: timeIntervalRef.current.timeUnit,
+                count: timeIntervalRef.current.count,
+                chartType: 'candlestick'
+              }) as CandleData[];
+              
+              console.log('📈 Chart data created:', { candleCount: chartData?.length || 0 });
+              
+              if(chartData.length > 0){
+                let isMounted = true;
+                const chart = chartRef.current;
+                try {
+                  if (
+                    chart &&
+                    chartData.length > 0 &&
+                    rootRef.current &&
+                    typeof chart.get === 'function' &&
+                    !(typeof chart.isDisposed === 'function' && chart.isDisposed())
+                  ) {
+                    const valueSeries = chart.get('stockSeries');
+                    const volumeSeries = chart.get('volumeSeries');
+                    if (valueSeries && volumeSeries) {          
+                      console.log('📊 Updating chart with data...');
+                      valueSeries.data.setAll(chartData);  
+                      volumeSeries.data.setAll(chartData);
+                      // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
+                      if (!hasZoomedInitially && chartData.length > 199) {
+                        valueSeries.events.once("datavalidated", function() {
+                          if (dateAxisRef.current) {
+                            const startIndex = Math.max(0, chartData.length - 200);
+                            const start = chartData[startIndex]?.timestamp;
+                            const end = chartData[chartData.length - 1]?.timestamp;
+                            if (start && end) {
+                              console.log('🔍 Setting initial zoom...');
+                              dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+                              setHasZoomedInitially(true);
+                            }
                           }
-                        }
-                      });
-                    }
-                  } 
+                        });
+                      }
+                    } 
+                  }
+                } catch (err) {
+                  console.error('❌ Chart update error (possibly disposed):', err);
                 }
-              } catch (err) {
-                console.error('Chart update error (possibly disposed):', err);
+                return () => { isMounted = false; };
               }
-              return () => { isMounted = false; };
+            } catch (error) {
+              console.error('❌ Worker chart data processing error:', error);
             }
           }
         })
       .catch(error => {
-        console.error('Geçmiş veriler çekilirken hata:', error);
+        console.error('❌ Geçmiş veriler çekilirken hata:', error);
       })
     // Handle MQTT data
-    const handleMqttData = (data: string) => {
+    const handleMqttData = async (data: string) => {
+      console.log('📡 MQTT data received:', { dataLength: data?.length, dataPreview: data?.substring(0, 100) });
       try {
-        const parsedData = JSON.parse(data);
-        if (!Array.isArray(parsedData)) return;
-        
-        const variableIndex = variableConfig.index;
-        if (variableIndex === undefined) return;
-        const value = parsedData[variableIndex + 1];
-        if (value === undefined) return;
-
-        const timestamp = new Date(parsedData[0]).getTime();
-
+        const result = await window.electronAPI.processMqttData(data, variableConfig);
+        console.log('🔧 MQTT data processed by worker:', result);
+        if (!result) {
+          console.warn('⚠️ No result from MQTT processing');
+          return;
+        }
+    
+        const { timestamp } = result;
+        const value = selectedVariable === "p" ? Math.abs(result.value) : result.value; // p değişkeni için pozitife çevir
+        console.log('📊 MQTT data values:', { timestamp, value, date: new Date(timestamp) });
+    
         setDataBuffer(prev => [...prev, { timestamp, value }]);
-        // Get current time interval
+    
         const { timeUnit, count } = timeIntervalRef.current;
         const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
         const roundedTime = Math.floor(timestamp / ms) * ms;
-
-        // Get the chart and series
+    
         const chart = chartRef.current;
-        if (!chart) return;
-        const valueSeries = chart.get('stockSeries');
-        const volumeSeries = chart.get('volumeSeries');
-        if (!valueSeries) return;
-
-        // Find the current candle for this time interval
-        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime);
+        if (!chart) {
+          console.warn('⚠️ Chart not available for MQTT update');
+          return;
+        }
+        const valueSeries = chart.get("stockSeries");
+        const volumeSeries = chart.get("volumeSeries");
+        if (!valueSeries) {
+          console.warn('⚠️ Value series not available');
+          return;
+        }
+    
+        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime) as CandleData | undefined;
         
         if (currentCandle) {
+          console.log('📈 Updating existing candle:', { roundedTime, currentCandle, newValue: value });
           // Update existing candle
-          const updatedCandle = {
+          const updatedCandle: CandleData = {
             ...currentCandle,
             high: Math.max(currentCandle.high, value),
             low: Math.min(currentCandle.low, value),
@@ -278,8 +268,9 @@ const Overview: React.FC = () => {
           valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
           volumeSeries?.data.setIndex(volumeSeries.data.indexOf(currentCandle), updatedCandle);
         } else {
+          console.log('🆕 Creating new candle:', { roundedTime, value });
           // Create new candle
-          const newCandle = {
+          const newCandle: CandleData = {
             timestamp: roundedTime,
             open: value,
             high: value,
@@ -290,27 +281,34 @@ const Overview: React.FC = () => {
           valueSeries.data.push(newCandle);
           volumeSeries?.data.push(newCandle);
         }
-
       } catch (error) {
-        console.error('Error parsing MQTT data:', error);
+        console.error("❌ Worker üzerinden MQTT verisi işlenirken hata:", error);
       }
     };
+    
     // Subscribe to MQTT updates
     const mqttIl = capitalize(selectedIl);
     const mqttGes = capitalize(selectedGes);
     const cihazGrubu = getCihazGrubu(selectedArac);
     if (cihazGrubu) {
       const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
+      console.log('📡 Subscribing to MQTT topic:', topic);
       window.electronAPI.subscribeMqtt(topic);
       const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
+        console.log('📡 MQTT message received:', { incomingTopic, expectedTopic: topic, matches: incomingTopic?.toLowerCase() === topic.toLowerCase() });
         if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
           handleMqttData(data);
         }
       });
 
       return () => {
-        if (typeof unsubscribe === 'function') unsubscribe();
+        console.log('📡 Unsubscribing from MQTT topic:', topic);
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
       };
+    } else {
+      console.warn('⚠️ No device group found for:', selectedArac);
     }
   }, [selectedVariable]);
   // Ana effect - selectedVariable değişikliğini dinler
@@ -584,104 +582,44 @@ const Overview: React.FC = () => {
 
   // Geçmiş veri yükleme fonksiyonu
   const loadHistoricalData = useCallback(async (startTime: Date, endTime: Date) => {
-    console.log("çekiliyoor")
+    console.log("çekiliyoor");
+  
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable || isLoadingHistoricalData) return;
-    
+  
     setIsLoadingHistoricalData(true);
-    const dbName = `${selectedIl}_${selectedGes}`;   
+    const dbName = `${selectedIl}_${selectedGes}`;
+  
     try {
       const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime);
+  
       if (records && records.length > 0) {
-        const newData = records
-          .map(record => {
-            const value = record[selectedVariable];
-            const numValue = Number(value);
-            const timestamp = new Date(record.timestamp).getTime();
-            return {
-              timestamp: timestamp,
-              value: numValue
-            };
-          })
-          .filter((item): item is { timestamp: number; value: number } => item !== null)
+        const newData: ChartDataPoint[] = records
+          .map(record => ({
+            timestamp: new Date(record.timestamp).getTime(),
+            value: selectedVariable === "p" ? Math.abs(Number(record[selectedVariable])) : Number(record[selectedVariable]) // p değişkeni için pozitife çevir
+          }))
+          .filter(d => !isNaN(d.value))
           .sort((a, b) => a.timestamp - b.timestamp);
-        setDataBuffer(prev => [...newData,...prev]);
-
-        // Zaman aralığına göre timestamp'i yuvarla
-        const getRoundedTimestamp = (timestamp: number) => {
-          const { timeUnit, count } = timeIntervalRef.current;
-          const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-          return Math.floor(timestamp / ms) * ms;
-        };
-
-        // Seçilen zaman aralığına göre gruplama
-        const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-        
-        newData.forEach(d => {
-          const roundedTime = getRoundedTimestamp(d.timestamp);
-          if (!grouped.has(roundedTime)) {
-            grouped.set(roundedTime, { values: [], timestamps: [] });
+  
+        setDataBuffer(prev => [...newData, ...prev]);
+  
+        const chartData = await window.electronAPI.getChartData({
+          data: newData,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'candlestick'
+        }) as CandleData[];
+  
+        if (chartData.length > 0 && chartRef.current) {
+          const valueSeries = chartRef.current.get('stockSeries');
+          const volumeSeries = chartRef.current.get('volumeSeries');
+  
+          if (valueSeries && volumeSeries) {
+            const existingData = valueSeries.data.values as CandleData[];
+            const combinedData = [...chartData, ...existingData];
+            valueSeries.data.setAll(combinedData);
+            volumeSeries.data.setAll(combinedData);
           }
-          const group = grouped.get(roundedTime)!;
-          group.values.push(d.value);
-          group.timestamps.push(d.timestamp);
-        });
-
-        // Her zaman aralığı için bir mum oluştur
-        const historicalCandles = Array.from(grouped.entries())
-          .filter(([_, group]) => group.values.length > 0)
-          .sort(([timeA], [timeB]) => timeA - timeB)
-          .map(([time, group]) => {
-            const values = group.values;
-            if (values.length === 0) return null;
-            
-            const open = values[0];
-            const close = values[values.length - 1];
-            const high = Math.max(...values);
-            const low = Math.min(...values);
-            
-            if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
-              console.log('Invalid candle values:', { time, open, close, high, low });
-              return null;
-            }
-            
-            return {
-              timestamp: time,
-              open,
-              high,
-              low,
-              close,
-              volume: values.length
-            };
-          })
-          .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-        
-        if(historicalCandles.length > 0){
-          let isMounted = true;
-          const chart = chartRef.current;
-          try {
-            if (
-              chart &&
-              historicalCandles.length > 0 &&
-              rootRef.current &&
-              typeof chart.get === 'function' &&
-              !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-            ) {
-              const valueSeries = chart.get('stockSeries');
-              const volumeSeries = chart.get('volumeSeries');
-              if (valueSeries && volumeSeries) {
-                //console.log("valueseries before",valueSeries.data.length);
-                //console.log("historicalCandles",historicalCandles);
-                const existingData = valueSeries.data.values;
-                const combinedData = [...historicalCandles, ...existingData];
-                valueSeries.data.setAll(combinedData);
-                volumeSeries.data.setAll(combinedData);
-                //console.log("valueseries after",valueSeries.data.length);
-              }
-            }
-          } catch (err) {
-            console.error('Historical chart update error:', err);
-          }
-          return () => { isMounted = false; };
         }
       }
     } catch (error) {
@@ -692,29 +630,44 @@ const Overview: React.FC = () => {
   }, [selectedVariable]);
 
   const addComparisonLine = async (key: string, variableName: string) => {
-    if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) return;
-   
+    console.log(`📊 Adding comparison line:`, { key, variableName });
+    if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) {
+      console.warn('⚠️ Chart references not ready for comparison line.');
+      return;
+    }
+  
     const chart = chartRef.current;
     const mainPanel = chart.panels.getIndex(0);
     if (!mainPanel) return;
-
+  
     const [il, ges, arac] = key.split('/');
     const dbName = `${il}_${ges}`;
     const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
-    console.log("addComparisonLine çalıştı",key, variableName)
-    if (!variableConfig) return;
-
+    if (!variableConfig) {
+      console.warn(`⚠️ Variable config not found for comparison line:`, { key, variableName });
+      return;
+    }
+  
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10 * 60 * 60 * 1000); // son 10 saat
-
-    const records = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTime, endTime);
-
-    const lineData = records.map(record => {
-      const value = Number(record[variableName]);
-      const timestamp = new Date(record.timestamp).getTime();
-      return { timestamp, value };
-    }).filter(d => !isNaN(d.value));
-
+    console.log(`📥 Fetching historical data for comparison line:`, { dbName, arac, startTime, endTime });
+    const rawRecords = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTime, endTime);
+    console.log(`✅ Historical data received for comparison line:`, { recordCount: rawRecords?.length || 0 });
+  
+    const rawData: ChartDataPoint[] = rawRecords.map(record => ({
+      timestamp: new Date(record.timestamp).getTime(),
+      value: variableName === "p" ? Math.abs(Number(record[variableName])) : Number(record[variableName]) // p değişkeni için pozitife çevir
+    })).filter(d => !isNaN(d.value));
+  
+    console.log(`🔧 Creating chart data for comparison line with worker...`);
+    const lineData = await window.electronAPI.getChartData({
+      data: rawData,
+      timeUnit: timeIntervalRef.current.timeUnit,
+      count: timeIntervalRef.current.count,
+      chartType: 'line'
+    }) as ChartDataPoint[];
+    console.log(`📈 Chart data created for comparison line:`, { dataPointCount: lineData?.length || 0 });
+  
     const series = am5xy.LineSeries.new(rootRef.current, {
       name: `${key}-${variableName}`,
       valueXField: "timestamp",
@@ -726,39 +679,69 @@ const Overview: React.FC = () => {
         labelText: `{name}\n[bold]{valueY}[/]`
       })
     });
-
+  
     series.data.setAll(lineData);
     mainPanel.series.push(series);
     comparisonSeriesRefs.current.push(series);
-
-    // MQTT canlı veri kısmı
+  
+    // MQTT aboneliği
     const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
     const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
     const cihazGrubu = getCihazGrubu(arac);
     if (!cihazGrubu) return;
-
+  
     const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
+    console.log(`📡 Subscribing to MQTT for comparison line:`, { topic });
     await window.electronAPI.subscribeMqtt(topic);
-
-    const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
+  
+    const unsubscribe = window.electronAPI.onMqttData(async (data, incomingTopic) => {
       if (incomingTopic?.toLowerCase() === topic.toLowerCase()) {
         try {
-          const parsed = JSON.parse(data);
-          const variableIndex = variableConfig.index;
-          const value = parsed[variableIndex + 1];
-          const timestamp = new Date(parsed[0]).getTime();
-          if (isNaN(value) || isNaN(timestamp)) return;
-          series.data.push({ timestamp, value });
+          const result = await window.electronAPI.processMqttData(data, variableConfig);
+          if (!result) return;
+          const { timestamp } = result;
+          const value = variableName === "p" ? Math.abs(result.value) : result.value; // p değişkeni için pozitife çevir
+          
+          const { timeUnit, count } = timeIntervalRef.current;
+          const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+          const roundedTime = Math.floor(timestamp / ms) * ms;
+
+          const lastPoint: any = series.data.getIndex(series.data.length - 1);
+
+          if (lastPoint && lastPoint.timestamp === roundedTime) {
+            // Mevcut zaman aralığındaki noktanın ortalamasını güncelle
+            const currentSum = lastPoint._sum || lastPoint.value;
+            const currentCount = lastPoint._count || 1;
+            
+            const newSum = currentSum + value;
+            const newCount = currentCount + 1;
+
+            series.data.setIndex(series.data.length - 1, {
+              timestamp: roundedTime,
+              value: newSum / newCount,
+              _sum: newSum,
+              _count: newCount
+            });
+          } else {
+            // Yeni zaman aralığı için yeni bir nokta ekle
+            series.data.push({
+              timestamp: roundedTime,
+              value: value,
+              _sum: value,
+              _count: 1
+            });
+          }
         } catch (err) {
-          console.error("MQTT comparison parse error:", err);
+          console.error("❌ MQTT comparison parse error:", err);
         }
       }
     });
-
+  
     if (typeof unsubscribe === "function") {
       comparisonUnsubscribeRefs.current.push(unsubscribe);
     }
   };
+  
 
   // Karşılaştırma serilerini yönetmek için useEffect
   useEffect(() => {
@@ -880,62 +863,43 @@ const Overview: React.FC = () => {
     // Önce mevcut verileri temizle
     valueSeries.data.clear();
 
-    // Zaman aralığına göre timestamp'i yuvarla
-    const getRoundedTimestamp = (timestamp: number) => {
-      const { timeUnit, count } = timeIntervalRef.current;
-      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-      return Math.floor(timestamp / ms) * ms;
+    // Worker kullanarak yeni chart verisi oluştur
+    const processChartData = async () => {
+      try {
+        const chartData = await window.electronAPI.getChartData({
+          data: dataBuffer,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'candlestick'
+        }) as CandleData[];
+
+        const volumeSeries = chart.get('volumeSeries');
+        // Verileri güncelle
+        valueSeries.data.setAll(chartData);
+        volumeSeries?.data.setAll(chartData);
+
+        // DateAxis'i güncelle
+        if (dateAxisRef.current) {
+          dateAxisRef.current.set("baseInterval", {
+            timeUnit: timeIntervalRef.current.timeUnit,
+            count: timeIntervalRef.current.count
+          });
+        }
+
+        // Veri güncellemesi tamamlandığında zoom'u ayarla
+        valueSeries.events.once("datavalidated", function() {
+          if (dateAxisRef.current && chartData.length > 0) {
+            const start = chartData[0].timestamp;
+            const end = chartData[chartData.length - 1].timestamp;
+            dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+          }
+        });
+      } catch (error) {
+        console.error('Worker chart data processing error in timeInterval effect:', error);
+      }
     };
 
-    // Seçilen zaman aralığına göre gruplama
-    const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-    dataBuffer.forEach((d: any) => {
-      const roundedTime = getRoundedTimestamp(d.timestamp);
-      if (!grouped.has(roundedTime)) {
-        grouped.set(roundedTime, { values: [], timestamps: [] });
-      }
-      const group = grouped.get(roundedTime)!;
-      group.values.push(d.value);
-      group.timestamps.push(d.timestamp);
-    });
-
-    // Her zaman aralığı için yeni mum oluştur
-    const newCandles = Array.from(grouped.entries())
-      .filter(([_, group]) => group.values.length > 0)
-      .sort(([timeA], [timeB]) => timeA - timeB)
-      .map(([time, group]) => {
-        const values = group.values;
-        return {
-          timestamp: time,
-          open: values[0],
-          high: Math.max(...values),
-          low: Math.min(...values),
-          close: values[values.length - 1],
-          volume: values.length
-        };
-      });
-
-    const volumeSeries = chart.get('volumeSeries');
-    // Verileri güncelle
-    valueSeries.data.setAll(newCandles);
-    volumeSeries?.data.setAll(newCandles);
-
-    // DateAxis'i güncelle
-    if (dateAxisRef.current) {
-      dateAxisRef.current.set("baseInterval", {
-        timeUnit: timeIntervalRef.current.timeUnit,
-        count: timeIntervalRef.current.count
-      });
-    }
-
-    // Veri güncellemesi tamamlandığında zoom'u ayarla
-    valueSeries.events.once("datavalidated", function() {
-      if (dateAxisRef.current && newCandles.length > 0) {
-        const start = newCandles[0].timestamp;
-        const end = newCandles[newCandles.length - 1].timestamp;
-        dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-      }
-    });
+    processChartData();
 
     return () => {
       // Cleanup function if needed

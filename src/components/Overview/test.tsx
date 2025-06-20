@@ -1,36 +1,27 @@
-/**
- * ---------------------------------------
- * This demo was created using amCharts 5.
- * 
- * For more information visit:
- * https://www.amcharts.com/
- * 
- * Documentation is available at:
- * https://www.amcharts.com/docs/v5/
- * ---------------------------------------
- */
-
-// Generate random data
-function generateDailyData(start, end, startValue) {
-  var data = [];
-  var value = startValue || Math.random() * 100;
-  var date = new Date(start.getTime());
-  while (date < end) {
-    data.push({
-      date: date.getTime(),
-      value: value
-    });
-    value += (Math.random() - 0.5) * 5;
-    date.setDate(date.getDate() + 1);
-  }
-  return data;
+<!-- Styles -->
+<style>
+#chartcontrols {
+  height: auto;
+  padding: 5px 5px 0 16px;
+  max-width: 100%;
 }
 
-var from = new Date();
-from.setFullYear(2023);
-var to = new Date();
-var data = generateDailyData(from, to);
+#chartdiv {
+  width: 100%;
+  height: 600px;
+  max-width: 100%;
+}
+</style>
 
+<!-- Resources -->
+<script src="https://cdn.amcharts.com/lib/5/index.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/xy.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/stock.js"></script>
+<script src="https://cdn.amcharts.com/lib/5/themes/Animated.js"></script>
+
+<!-- Chart code -->
+<script>
+am5.ready(function() {
 
 // Create root element
 // -------------------------------------------------------------------------------
@@ -48,10 +39,11 @@ root.setThemes([
   myTheme
 ]);
 
+
 // Create a stock chart
 // -------------------------------------------------------------------------------
 // https://www.amcharts.com/docs/v5/charts/stock/#Instantiating_the_chart
-var stockChart = root.container.children.push(am5stock.StockChart.new(root, {  
+var stockChart = root.container.children.push(am5stock.StockChart.new(root, {
   paddingRight: 0
 }));
 
@@ -100,15 +92,18 @@ var dateAxis = mainPanel.xAxes.push(am5xy.GaplessDateAxis.new(root, {
 // Add series
 // -------------------------------------------------------------------------------
 // https://www.amcharts.com/docs/v5/charts/xy-chart/series/
-var valueSeries = mainPanel.series.push(am5xy.LineSeries.new(root, {
+var valueSeries = mainPanel.series.push(am5xy.CandlestickSeries.new(root, {
   name: "MSFT",
   clustered: false,
-  valueXField: "date",
-  valueYField: "value",
+  valueXField: "Date",
+  valueYField: "Close",
+  highValueYField: "High",
+  lowValueYField: "Low",
+  openValueYField: "Open",
   calculateAggregates: true,
   xAxis: dateAxis,
   yAxis: valueAxis,
-  legendValueText: "[bold]{valueY}[/]",
+  legendValueText: "open: [bold]{openValueY}[/] high: [bold]{highValueY}[/] low: [bold]{lowValueY}[/] close: [bold]{valueY}[/]",
   legendRangeValueText: ""
 }));
 
@@ -127,10 +122,53 @@ var valueLegend = mainPanel.plotContainer.children.push(am5stock.StockLegend.new
 }));
 
 
+// Create volume axis
+// -------------------------------------------------------------------------------
+// https://www.amcharts.com/docs/v5/charts/xy-chart/axes/
+var volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
+volumeAxisRenderer.labels.template.set("forceHidden", true);
+volumeAxisRenderer.grid.template.set("forceHidden", true);
+
+var volumeValueAxis = mainPanel.yAxes.push(am5xy.ValueAxis.new(root, {
+  numberFormat: "#.#a",
+  height: am5.percent(20),
+  y: am5.percent(100),
+  centerY: am5.percent(100),
+  renderer: volumeAxisRenderer
+}));
+
+// Add series
+// https://www.amcharts.com/docs/v5/charts/xy-chart/series/
+var volumeSeries = mainPanel.series.push(am5xy.ColumnSeries.new(root, {
+  name: "Volume",
+  clustered: false,
+  valueXField: "Date",
+  valueYField: "Volume",
+  xAxis: dateAxis,
+  yAxis: volumeValueAxis,
+  legendValueText: "[bold]{valueY.formatNumber('#,###.0a')}[/]"
+}));
+
+volumeSeries.columns.template.setAll({
+  strokeOpacity: 0,
+  fillOpacity: 0.5
+});
+
+// color columns by stock rules
+volumeSeries.columns.template.adapters.add("fill", function (fill, target) {
+  var dataItem = target.dataItem;
+  if (dataItem) {
+    return stockChart.getVolumeColor(dataItem);
+  }
+  return fill;
+})
+
+
 // Set main series
 // -------------------------------------------------------------------------------
 // https://www.amcharts.com/docs/v5/charts/stock/#Setting_main_series
-valueLegend.data.setAll([valueSeries]);
+stockChart.set("volumeSeries", volumeSeries);
+valueLegend.data.setAll([valueSeries, volumeSeries]);
 
 
 // Add cursor(s)
@@ -168,8 +206,8 @@ var sbValueAxis = scrollbar.chart.yAxes.push(am5xy.ValueAxis.new(root, {
 }));
 
 var sbSeries = scrollbar.chart.series.push(am5xy.LineSeries.new(root, {
-  valueYField: "value",
-  valueXField: "date",
+  valueYField: "Close",
+  valueXField: "Date",
   xAxis: sbDateAxis,
   yAxis: sbValueAxis
 }));
@@ -178,6 +216,159 @@ sbSeries.fills.template.setAll({
   visible: true,
   fillOpacity: 0.3
 });
+
+
+// Function that dynamically loads data
+function loadData(ticker, series, granularity) {
+
+  // Load external data
+  // https://www.amcharts.com/docs/v5/charts/xy-chart/series/#Setting_data
+  am5.net.load("https://www.amcharts.com/wp-content/uploads/assets/docs/stock/" + ticker + "_" + granularity + ".csv").then(function (result) {
+
+    // Parse loaded data
+    var data = am5.CSVParser.parse(result.response, {
+      delimiter: ",",
+      skipEmpty: true,
+      useColumnNames: true
+    });
+
+    // Process data (convert dates and values)
+    var processor = am5.DataProcessor.new(root, {
+      dateFields: ["Date"],
+      dateFormat: "yyyy-MM-dd",
+      numericFields: ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+    });
+    processor.processMany(data);
+
+    // Set data
+    am5.array.each(series, function (item) {
+      item.data.setAll(data);
+    });
+  });
+}
+
+// Load initial data for the first series
+var currentGranularity = "day";
+loadData("MSFT", [valueSeries, volumeSeries, sbSeries], currentGranularity);
+
+// Add comparing series
+addComparingSeries("AAPL");
+
+
+// Set up main indices selector
+// -------------------------------------------------------------------------------
+// https://www.amcharts.com/docs/v5/charts/stock/toolbar/comparison-control/
+var mainSeriesControl = am5stock.DropdownListControl.new(root, {
+  stockChart: stockChart,
+  name: valueSeries.get("name"),
+  icon: am5stock.StockIcons.getIcon("Candlestick Series"),
+  fixedLabel: true,
+  searchable: true,
+  searchCallback: function (query) {
+    var mainSeries = stockChart.get("stockSeries");
+    var mainSeriesID = mainSeries ? mainSeries.get("name") : "";
+    var list = getTicker(query);
+    am5.array.each(list, function (item) {
+      if (item.id == mainSeriesID) {
+        item.disabled = true;
+      }
+    })
+    return list;
+  }
+});
+
+mainSeriesControl.events.on("selected", function (ev) {
+  var valueSeries = stockChart.get("stockSeries");
+  var volumeSeries = stockChart.get("volumeSeries");
+
+  mainSeriesControl.set("name", ev.item.subLabel);
+  valueSeries.set("name", ev.item.subLabel);
+  loadData(ev.item.subLabel, [valueSeries, volumeSeries, sbSeries], currentGranularity);
+  
+  // Remove a compared series for the same index if present
+  var comparedSeries = stockChart.getPrivate("comparedSeries");
+  am5.array.eachReverse(comparedSeries, function(compared) {
+    if (compared.get("name") == valueSeries.get("name")) {
+      stockChart.removeComparingSeries(compared);
+    }
+  })
+});
+
+
+// Set up comparison control
+// -------------------------------------------------------------------------------
+// https://www.amcharts.com/docs/v5/charts/stock/toolbar/comparison-control/
+var comparisonControl = am5stock.ComparisonControl.new(root, {
+  stockChart: stockChart,
+  searchable: true,
+  searchCallback: function (query) {
+    var compared = stockChart.getPrivate("comparedSeries", []);
+    var main = stockChart.get("stockSeries");
+    if (compared.length > 4) {
+      return [{
+        label: "A maximum of 5 comparisons added",
+        subLabel: "Remove some to add new ones",
+        id: "",
+        className: "am5stock-list-info"
+      }];
+    };
+
+    var comparedIds = [];
+    am5.array.each(compared, function (series) {
+      comparedIds.push(series.get("name"));
+    });
+
+    var list = getTicker(query);
+    am5.array.each(list, function (item) {
+      if (comparedIds.indexOf(item.id) !== -1 || main.get("name") == item.id) {
+        item.disabled = true;
+      }
+    })
+    return list;
+  }
+});
+
+comparisonControl.events.on("selected", function (ev) {
+  if (ev.item.id != "") {
+    addComparingSeries(ev.item.subLabel);
+  }
+});
+
+function addComparingSeries(label) {
+  var series = am5xy.LineSeries.new(root, {
+    name: label,
+    valueYField: "Close",
+    calculateAggregates: true,
+    valueXField: "Date",
+    xAxis: dateAxis,
+    yAxis: valueAxis,
+    legendValueText: "{valueY.formatNumber('#.00')}"
+  });
+  var comparingSeries = stockChart.addComparingSeries(series);
+  loadData(label, [comparingSeries], currentGranularity);
+}
+
+function getTicker(search) {
+  if (search == "") {
+    return [];
+  }
+  search = search.toLowerCase();
+  var tickers = [
+    { label: "Apple", subLabel: "AAPL", id: "AAPL" },
+    { label: "Advanced Micro Devices", subLabel: "AMD", id: "AMD" },
+    { label: "Microsoft", subLabel: "MSFT", id: "MSFT" },
+    { label: "Alphabet (Google)", subLabel: "GOOG", id: "GOOG" },
+    { label: "Amazon", subLabel: "AMZN", id: "AMZN" },
+    { label: "Tesla", subLabel: "TSLA", id: "TSLA" },
+    { label: "NVIDIA", subLabel: "NVDA", id: "NVDA" },
+    { label: "Netflix", subLabel: "NFLX", id: "NFLX" }
+  ];
+
+  return tickers.filter(function (item) {
+    return item.label.toLowerCase().match(search) || item.subLabel.toLowerCase().match(search);
+  });
+}
+
 
 // Set up series type switcher
 // -------------------------------------------------------------------------------
@@ -248,6 +439,8 @@ var toolbar = am5stock.StockToolbar.new(root, {
   container: document.getElementById("chartcontrols"),
   stockChart: stockChart,
   controls: [
+    mainSeriesControl,
+    comparisonControl,
     am5stock.IndicatorControl.new(root, {
       stockChart: stockChart,
       legend: valueLegend
@@ -262,9 +455,6 @@ var toolbar = am5stock.StockToolbar.new(root, {
     am5stock.DrawingControl.new(root, {
       stockChart: stockChart
     }),
-    am5stock.DataSaveControl.new(root, {
-      stockChart: stockChart
-    }),
     am5stock.ResetControl.new(root, {
       stockChart: stockChart
     }),
@@ -274,42 +464,9 @@ var toolbar = am5stock.StockToolbar.new(root, {
   ]
 })
 
-var tooltip = am5.Tooltip.new(root, {
-  getStrokeFromSprite: false,
-  getFillFromSprite: false
-});
+}); // end am5.ready()
+</script>
 
-tooltip.get("background").setAll({
-  strokeOpacity: 1,
-  stroke: am5.color(0x000000),
-  fillOpacity: 1,
-  fill: am5.color(0xffffff)
-});
-
-
-// set data to all series
-valueSeries.data.setAll(data);
-sbSeries.data.setAll(data);
-
-
-// Dynamic loading
-var loadDebouncer;
-dateAxis.on("start", function(start) {
-  if (start < 0) {
-    if (loadDebouncer) {
-      clearTimeout(loadDebouncer);
-    }
-    loadDebouncer = setTimeout(function() {
-      var from = new Date(dateAxis.getPrivate("selectionMin")-5600*3600*1000);
-      console.log("ceynep"+from);
-      var to = new Date(valueSeries.data.values[0].date - 24 * 60 * 60 * 1000)
-      var startValue = valueSeries.data.values[0].value;
-      startValue += (Math.random() - 0.5) * 5;
-      var newData = generateDailyData(from, to, startValue);
-      var data = newData.concat(valueSeries.data.values);
-      valueSeries.data.setAll(data);
-      sbSeries.data.setAll(data);
-      dateAxis.zoom(0, 1, 0);
-    }, 100)
-  }
-})
+<!-- HTML -->
+<div id="chartcontrols"></div>
+<div id="chartdiv"></div>
