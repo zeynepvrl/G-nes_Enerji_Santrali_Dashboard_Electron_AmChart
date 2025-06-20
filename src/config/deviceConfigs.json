@@ -5158,6 +5158,882 @@
         }
       ]
     },
+    "cva15": {
+      "analizor": [
+        {
+          "name": "q1",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 0
+        },
+        {
+          "name": "q2",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 1
+        },
+        {
+          "name": "q3",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 2
+        },
+        {
+          "name": "q4",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 3
+        },
+        {
+          "name": "current_l1",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "",
+          "index": 4
+        },
+        {
+          "name": "current_l2",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "",
+          "index": 5
+        },
+        {
+          "name": "current_l3",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "",
+          "index": 6
+        },
+        {
+          "name": "frequency",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "",
+          "index": 7
+        },
+        {
+          "name": "voltage_l1",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 8
+        },
+        {
+          "name": "voltage_l2",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 9
+        },
+        {
+          "name": "voltage_l3",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 10
+        },
+        {
+          "name": "voltage_l12",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 11
+        },
+        {
+          "name": "voltage_l23",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 12
+        },
+        {
+          "name": "voltage_l31",
+          "type": "udint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 13
+        },
+        {
+          "name": "p",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 14
+        },
+        {
+          "name": "q",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 15
+        },
+        {
+          "name": "s",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 16
+        },
+        {
+          "name": "wp_imp",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 17
+        },
+        {
+          "name": "wp_exp",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 18
+        },
+        {
+          "name": "wq_imp",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 19
+        },
+        {
+          "name": "wq_exp",
+          "type": "dint",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 20
+        },
+        {
+          "name": "power_factor",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "",
+          "index": 21
+        }
+      ],
+      "inverter": [
+        {
+          "name": "status_vendor",
+          "type": "str",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 0
+        },
+        {
+          "name": "status_operating",
+          "type": "str",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 1
+        },
+        {
+          "name": "major_alarm",
+          "type": "str",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 2
+        },
+        {
+          "name": "major_alarm_2",
+          "type": "str",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 3
+        },
+        {
+          "name": "major_alarm_3",
+          "type": "str",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 4
+        },
+        {
+          "name": "dc_input_voltage_1",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 5
+        },
+        {
+          "name": "dc_input_current_1",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 6
+        },
+        {
+          "name": "dc_input_voltage_2",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 7
+        },
+        {
+          "name": "dc_input_current_2",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 8
+        },
+        {
+          "name": "dc_input_voltage_3",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 9
+        },
+        {
+          "name": "dc_input_current_3",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 10
+        },
+        {
+          "name": "dc_input_voltage_4",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 11
+        },
+        {
+          "name": "dc_input_current_4",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 12
+        },
+        {
+          "name": "dc_input_voltage_5",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 13
+        },
+        {
+          "name": "dc_input_current_5",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 14
+        },
+        {
+          "name": "dc_input_voltage_6",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 15
+        },
+        {
+          "name": "dc_input_current_6",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 16
+        },
+        {
+          "name": "dc_input_voltage_7",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 17
+        },
+        {
+          "name": "dc_input_current_7",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 18
+        },
+        {
+          "name": "dc_input_voltage_8",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 19
+        },
+        {
+          "name": "dc_input_current_8",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 20
+        },
+        {
+          "name": "dc_input_voltage_9",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 21
+        },
+        {
+          "name": "dc_input_current_9",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 22
+        },
+        {
+          "name": "dc_input_voltage_10",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 23
+        },
+        {
+          "name": "dc_input_current_10",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 24
+        },
+        {
+          "name": "dc_input_voltage_11",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 25
+        },
+        {
+          "name": "dc_input_current_11",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 26
+        },
+        {
+          "name": "dc_input_voltage_12",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 27
+        },
+        {
+          "name": "dc_input_current_12",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 28
+        },
+        {
+          "name": "dc_input_voltage_13",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 29
+        },
+        {
+          "name": "dc_input_current_13",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 30
+        },
+        {
+          "name": "dc_input_voltage_14",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 31
+        },
+        {
+          "name": "dc_input_current_14",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 32
+        },
+        {
+          "name": "dc_input_voltage_15",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 33
+        },
+        {
+          "name": "dc_input_current_15",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 34
+        },
+        {
+          "name": "dc_input_voltage_16",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 35
+        },
+        {
+          "name": "dc_input_current_16",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 36
+        },
+        {
+          "name": "dc_input_voltage_17",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 37
+        },
+        {
+          "name": "dc_input_current_17",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 38
+        },
+        {
+          "name": "dc_input_voltage_18",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 39
+        },
+        {
+          "name": "dc_input_current_18",
+          "type": "int",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 40
+        },
+        {
+          "name": "dc_input_power_total",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 41
+        },
+        {
+          "name": "ac_voltage_ab",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 42
+        },
+        {
+          "name": "ac_voltage_bc",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 43
+        },
+        {
+          "name": "ac_voltage_ca",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 44
+        },
+        {
+          "name": "ac_voltage_an",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 45
+        },
+        {
+          "name": "ac_voltage_bn",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 46
+        },
+        {
+          "name": "ac_voltage_cn",
+          "type": "uint",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 47
+        },
+        {
+          "name": "ac_current_an",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 48
+        },
+        {
+          "name": "ac_current_bn",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 49
+        },
+        {
+          "name": "ac_current_cn",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 50
+        },
+        {
+          "name": "active_power",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 51
+        },
+        {
+          "name": "reactive_power",
+          "type": "dint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 52
+        },
+        {
+          "name": "power_factor",
+          "type": "int",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 53
+        },
+        {
+          "name": "frequency",
+          "type": "uint",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 54
+        },
+        {
+          "name": "efficiency",
+          "type": "uint",
+          "multiplier": 0.01,
+          "aggregation": "avg",
+          "index": 55
+        },
+        {
+          "name": "temperature_inv",
+          "type": "int",
+          "multiplier": 0.1,
+          "aggregation": "avg",
+          "index": 56
+        },
+        {
+          "name": "isolation_resistance",
+          "type": "uint",
+          "multiplier": 0.001,
+          "aggregation": "avg",
+          "index": 57
+        },
+        {
+          "name": "status",
+          "type": "uint",
+          "multiplier": 1,
+          "aggregation": "last",
+          "index": 58
+        },
+        {
+          "name": "total_energy",
+          "type": "udint",
+          "multiplier": 0.01,
+          "aggregation": "last",
+          "index": 59
+        },
+        {
+          "name": "daily_energy",
+          "type": "udint",
+          "multiplier": 0.01,
+          "aggregation": "last",
+          "index": 60
+        },
+        {
+          "name": "monthly_energy",
+          "type": "udint",
+          "multiplier": 0.01,
+          "aggregation": "last",
+          "index": 61
+        },
+        {
+          "name": "yearly_energy",
+          "type": "udint",
+          "multiplier": 0.01,
+          "aggregation": "last",
+          "index": 62
+        }
+      ],
+      "rtu": [
+        {
+          "name": "reg_2031618",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 0
+        },
+        {
+          "name": "reg_2031620",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 1
+        },
+        {
+          "name": "reg_2031621",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 2
+        },
+        {
+          "name": "reg_2031622",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 3
+        },
+        {
+          "name": "reg_2031623",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 4
+        },
+        {
+          "name": "reg_2031624",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 5
+        },
+        {
+          "name": "reg_2031625",
+          "type": "bit;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 6
+        },
+        {
+          "name": "reg_2034433",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 7
+        },
+        {
+          "name": "reg_2034434",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 8
+        },
+        {
+          "name": "reg_2034435",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 9
+        },
+        {
+          "name": "reg_2034436",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 10
+        },
+        {
+          "name": "reg_2034437",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 11
+        },
+        {
+          "name": "reg_2034438",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 12
+        },
+        {
+          "name": "reg_2034439",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 13
+        },
+        {
+          "name": "reg_2034440",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 14
+        },
+        {
+          "name": "reg_2034441",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 15
+        },
+        {
+          "name": "reg_2034442",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 16
+        },
+        {
+          "name": "reg_2034443",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 17
+        },
+        {
+          "name": "reg_2034444",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 18
+        },
+        {
+          "name": "reg_2034445",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 19
+        },
+        {
+          "name": "reg_2034446",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 20
+        },
+        {
+          "name": "reg_2034447",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 21
+        },
+        {
+          "name": "reg_2034448",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 22
+        },
+        {
+          "name": "reg_2034449",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 23
+        },
+        {
+          "name": "reg_2034450",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 24
+        },
+        {
+          "name": "reg_2034451",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 25
+        },
+        {
+          "name": "reg_2034452",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 26
+        },
+        {
+          "name": "reg_2034453",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 27
+        },
+        {
+          "name": "reg_2034454",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 28
+        },
+        {
+          "name": "reg_2034455",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 29
+        },
+        {
+          "name": "reg_2034456",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 30
+        },
+        {
+          "name": "reg_2034457",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 31
+        },
+        {
+          "name": "reg_2034458",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 32
+        },
+        {
+          "name": "reg_2034459",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 33
+        },
+        {
+          "name": "reg_2034460",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 34
+        },
+        {
+          "name": "reg_2034461",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 35
+        },
+        {
+          "name": "reg_2034462",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 36
+        },
+        {
+          "name": "reg_2034463",
+          "type": "float;",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 37
+        },
+        {
+          "name": "reg_2034481",
+          "type": "float",
+          "multiplier": 1,
+          "aggregation": "",
+          "index": 38
+        }
+      ]
+    },
     "cva17": {
       "analizor": [
         {
