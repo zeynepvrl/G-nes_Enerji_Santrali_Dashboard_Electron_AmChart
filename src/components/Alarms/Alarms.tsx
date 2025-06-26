@@ -1,25 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import './Alarms.css';
 import alarmSound from '../../assets/fire_alarm.mp3';
+import { ElectronAPI, Measurement, Limit } from '../../types';
 
-interface Measurement {
-    name: string;
-    WERT: number;
-    DATUMZEIT: string;
-}
-interface Limit {
-    name: string;
-    limit_value: number;
-}
 declare global {
     interface Window {
-        electronAPI: {
-            getMssqlTables: () => Promise<Measurement[]>;
-            getLimits: () => Promise<Limit[]>;
-            updateLimit: (name: string, newLimit: number) => Promise<{ success: boolean; error?: string }>;
-        };
+        electronAPI: ElectronAPI;
     }
 }
+
 interface AlarmsProps {
     visible?: boolean;
 }
@@ -34,6 +23,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     const fetchData = async () => {
+        
         try {
             const [measurementsRes, limitsRes] = await Promise.all([
                 window.electronAPI.getMssqlTables(),
@@ -134,6 +124,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                     const limit = limits[m.name] ?? 200;
                                     const isAlarm = m.WERT > limit;
                                     const gesName = getGesName(m.name);
+                                    const isSpontaneous = m.isSpontaneous;
                                     const datum=new Date(m.DATUMZEIT);
                                     const now = Date.now();
                                     const isDataOutage =(now-datum.getTime()) > 2*60*1000;
@@ -171,6 +162,15 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                                             </button>
                                                         </span>
                                                     </div>
+                                                    {/* Spontane olmayan alarmlar için kırmızı nokta */}
+                                                    {!isSpontaneous && (
+                                                        <div className="info-table-row">
+                                                            <span className="label">Durum</span>
+                                                            <span className="value">
+                                                                <span className="manual-alarm-indicator">🔴 Veri İnvalid</span>
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                     {editingGES === m.name && (
                                                         <div className="edit-row">
                                                             <input

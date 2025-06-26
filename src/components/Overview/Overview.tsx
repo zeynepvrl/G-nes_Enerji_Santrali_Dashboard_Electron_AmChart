@@ -1,32 +1,61 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState,useCallback } from 'react';
 import * as am5 from '@amcharts/amcharts5';
 import * as am5xy from '@amcharts/amcharts5/xy';
 import * as am5stock from '@amcharts/amcharts5/stock';
 import am5themes_Animated from '@amcharts/amcharts5/themes/Animated';
 import './Overview.css';
 import deviceConfigs from '../../config/deviceConfigs.json';
-import NestedDropdown from './mainSeriesNestedDropDown';
+import MainSeriesNestedDropdown from './mainSeriesNestedDropDown';
 import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
-// Type definitions for deviceConfigs
+import {
+  ChartDataPoint,
+  CandleData,
+  TimeInterval,
+  ChartType,
+  ChartDataRequest,
+  VariableConfig,
+  DeviceType,
+  DeviceGroup,
+  DropdownData,
+  ProcessedMqttData,
+  ElectronAPI
+} from '../../types';   
 
-
-type VariableConfig = {
-  name: string;
-  index: number;
-};
-
-
+// Global window interface extension
 declare global {
   interface Window {
-    electronAPI: {
-      getTablesHistory: (dbName: string, tableName?: string, limit?: number, startTime?: Date, endTime?: Date) => Promise<any[]>;
-      onMqttData: (callback: (data: string, topic?: string) => void) => void;
-      getAllTables: () => Promise<{ [dbName: string]: string[] }>;
-      subscribeMqtt: (topic: string) => void;
-      unsubscribeMqtt: (topic: string) => void;
-    };
+    electronAPI: ElectronAPI;
   }
 }
+
+
+type SeriesConfig = {
+  il: string;
+  ges: string;
+  arac: string;
+  variable: string;
+  color?: string;
+};
+
+// Karşılaştırma çizgileri için renk paleti
+const COMPARISON_COLORS = [
+  "#ff6b6b", // Kırmızı
+  "#4ecdc4", // Turkuaz
+  "#45b7d1", // Mavi
+  "#96ceb4", // Yeşil
+  "#feca57", // Sarı
+  "#ff9ff3", // Pembe
+  "#54a0ff", // Mavi
+  "#5f27cd", // Mor
+  "#00d2d3", // Turkuaz
+  "#ff9f43", // Turuncu
+  "#10ac84", // Yeşil
+  "#ee5a24", // Kırmızı-turuncu
+  "#575fcf", // Mavi-mor
+  "#0abde3", // Açık mavi
+  "#48dbfb", // Çok açık mavi
+];
+
 
 const Overview: React.FC = () => {
   const chartRef = useRef<am5stock.StockChart | null>(null);
@@ -37,18 +66,13 @@ const Overview: React.FC = () => {
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
   const [selectedVariable, setSelectedVariable] = useState('');
-  const [dropdownData, setDropdownData] = useState<Record<string, Record<string, Record<string, VariableConfig[]>>>>({});
-  const timeIntervalRef = useRef<{
-    timeUnit: "minute" | "hour";
-    count: number;
-  }>({ timeUnit: "minute", count: 1 });
-
+  const [dropdownData, setDropdownData] = useState<DropdownData>({});
+  const timeIntervalRef = useRef<TimeInterval>({ timeUnit: "minute", count: 1 });
   // Veri buffer'ları için state'ler
-  const [dataBuffer, setDataBuffer] = useState<{ timestamp: number; value: number }[]>([]);
+  const [dataBuffer, setDataBuffer] = useState<ChartDataPoint[]>([]);
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
   const lastLoadTimeRef = useRef(0);
-  
   const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
@@ -56,13 +80,25 @@ const Overview: React.FC = () => {
   const comparisonSeriesRefs = useRef<am5xy.LineSeries[]>([]);
   const comparisonUnsubscribeRefs = useRef<(() => void)[]>([]);
   const prevComparisonSelections = useRef<Record<string, string[]>>({});
- 
+  const [mainSeriesConfig, setMainSeriesConfig] = useState<SeriesConfig | null>(null);
+  const [comparisonSeries, setComparisonSeries] = useState<SeriesConfig[]>([]);
+  // Karşılaştırma çizgilerinin renklerini saklamak için
+  const [comparisonColors, setComparisonColors] = useState<Record<string, string>>({});
+  // Popup pozisyonu için state
+  const [popupPosition, setPopupPosition] = useState({ x: 10, y: 10 });
+  const [isInitialPositionSet, setIsInitialPositionSet] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [comparisonStyles, setComparisonStyles] = useState<Record<string, { width: number; style: 'solid' | 'dashed' | 'dotted' }>>({});
+
   function capitalize(str: string) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
   }
   // Tablo adından cihaz grubunu otomatik bul
-  function getCihazGrubu(tablename: string) {
+  function getCihazGrubu(tablename: string): DeviceGroup | '' {
     if (!tablename) return '';
     const lower = tablename.toLowerCase();
     if (lower.startsWith('inv')) return 'inverters';
@@ -72,7 +108,7 @@ const Overview: React.FC = () => {
     return '';
   }
    // Get device type from table name
-   function getDeviceType(tablename: string) {
+   function getDeviceType(tablename: string): DeviceType | '' {
     if (!tablename) return '';
     const lower = tablename.toLowerCase();
     if (lower.startsWith('inv')) return 'inverter';
@@ -82,12 +118,12 @@ const Overview: React.FC = () => {
   }
  
   useEffect(() => {
-    if (!window.electronAPI?.getAllTables) return;
-    window.electronAPI.getAllTables().then((allTables) => {
+    if (!window.electronAPI?.getAllGESdbsAndTheirTablesForDropdowns) return;
+    window.electronAPI.getAllGESdbsAndTheirTablesForDropdowns().then((allGesdbs: any) => {
       const data: Record<string, Record<string, Record<string, VariableConfig[]>>> = {};
       const ilSet = new Set<string>();
 
-      Object.keys(allTables).forEach(dbName => {
+      Object.keys(allGesdbs).forEach(dbName => {
         const [il, ...gesArr] = dbName.split('_');
         const ges = gesArr.join('_');
         ilSet.add(il);
@@ -95,180 +131,178 @@ const Overview: React.FC = () => {
         if (!data[il]) data[il] = {};
         if (!data[il][ges]) data[il][ges] = {};
 
-        allTables[dbName].forEach(arac => {
-          let variables: VariableConfig[] = [];
-          const deviceType = getDeviceType(arac);
-          const config = (deviceConfigs as any)[il]?.[ges]?.[deviceType];
-          if (Array.isArray(config)) {
-            variables = config.map((v: any) => ({
-              name: v.name,
-              index: v.index
-            }));
-          }
-          data[il][ges][arac] = variables;
-        });
+        if(dbName.includes('zenon')){
+          Object.keys(allGesdbs[dbName]).forEach((tableName: string) => {
+            const columns = allGesdbs[dbName][tableName];
+            if (Array.isArray(columns)) {
+              const variables: VariableConfig[] = columns.map((columnName: string, index: number) => ({
+                name: columnName,
+                index: index
+              }));
+              data[il][ges][tableName] = variables;
+            }
+          });
+        }
+        else{
+          allGesdbs[dbName].forEach((arac: any) => {
+            let variables: VariableConfig[] = [];
+            const deviceType = getDeviceType(arac);
+            const config = (deviceConfigs as any)[il]?.[ges]?.[deviceType];
+            if (Array.isArray(config)) {
+              variables = config.map((v: any) => ({
+                name: v.name,
+                index: v.index
+              }));
+            }
+            data[il][ges][arac] = variables;
+          });
+        }
+        
       });
 
       setDropdownData(data);
+      setSelectedIl('eskisehir');
+      setSelectedGes('akkul');
+      setSelectedArac('analizor1');
+      setSelectedVariable('p');
+      
     });
   }, []);
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
-    if (selectedArac === "" || selectedVariable === "") return;
-   
     const dbName = `${selectedIl}_${selectedGes}`;
     const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
-
-    if (!variableConfig) return;
-    // Fetch historical data
+    if (!variableConfig) {
+      console.warn('⚠️ Variable config not found:', { selectedVariable, availableVariables: dropdownData[selectedIl][selectedGes][selectedArac] });
+      return;
+    }
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10*60*60*1000);
     
-    window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime)
-      .then(records => {
+    const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+    const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+
+    window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTimeStr, endTimeStr)
+      .then(async (records) => {
         if (records && records.length > 0) {
-          const rawData = records
+          const rawData: ChartDataPoint[] = records
             .map(record => {
-              const value = record[selectedVariable];
-              const numValue = Number(value);
               const timestamp = new Date(record.timestamp).getTime();
-              return {
-                timestamp: timestamp,
-                value: numValue
-              };
+              if(selectedVariable === "p"){
+                const value = record[selectedVariable];
+                const numValue = Math.abs(Number(value));
+                return {
+                  timestamp: timestamp,
+                  value: numValue
+                };
+              }
+              else{
+                const value = record[selectedVariable];
+                const numValue = Number(value);
+                return {
+                  timestamp: timestamp,
+                  value: numValue
+                };
+              }
             })
-            .filter((item): item is { timestamp: number; value: number } => item !== null)
+            .filter((item): item is ChartDataPoint => item !== null);
 
             setDataBuffer(rawData);
           
             if (!rawData || rawData.length === 0) {
-              console.log('rawdata is empty');
+              console.log('⚠️ Raw data is empty');
               return;
             }
         
-            // Zaman aralığına göre timestamp'i yuvarla
-            const getRoundedTimestamp = (timestamp: number) => {
-              const { timeUnit, count } = timeIntervalRef.current;
-              const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-              return Math.floor(timestamp / ms) * ms;
-            };
-        
-            // Seçilen zaman aralığına göre gruplama
-            const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-            
-            rawData.forEach(d => {
-              const roundedTime = getRoundedTimestamp(d.timestamp);
-              if (!grouped.has(roundedTime)) {
-                grouped.set(roundedTime, { values: [], timestamps: [] });
-              }
-              const group = grouped.get(roundedTime)!;
-              group.values.push(d.value);
-              group.timestamps.push(d.timestamp);
-            });
-        
-            // Her zaman aralığı için bir mum oluştur
-            const newCandles = Array.from(grouped.entries())
-              .filter(([_, group]) => group.values.length > 0)
-              .sort(([timeA], [timeB]) => timeA - timeB)
-              .map(([time, group]) => {
-                const values = group.values;
-                if (values.length === 0) return null;
-                
-                const open = values[0];
-                const close = values[values.length - 1];
-                const high = Math.max(...values);
-                const low = Math.min(...values);
-                
-                if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
-                  console.log('Invalid candle values:', { time, open, close, high, low });
-                  return null;
-                }
-                
-                return {
-                  timestamp: time,
-                  open,
-                  high,
-                  low,
-                  close,
-                  volume: values.length
-                };
-              })
-              .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-            if(newCandles.length > 0){
-              let isMounted = true;
-              const chart = chartRef.current;
-              try {
-                if (
-                  chart &&
-                  newCandles.length > 0 &&
-                  rootRef.current &&
-                  typeof chart.get === 'function' &&
-                  !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-                ) {
-                  const valueSeries = chart.get('stockSeries');
-                  const volumeSeries = chart.get('volumeSeries');
-                  if (valueSeries && volumeSeries) {          
-                    valueSeries.data.setAll(newCandles);  
-                    volumeSeries.data.setAll(newCandles);
-                    // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
-                    if (!hasZoomedInitially && newCandles.length > 199) {
-                      valueSeries.events.once("datavalidated", function() {
-                        if (dateAxisRef.current) {
-                          const startIndex = Math.max(0, newCandles.length - 200);
-                          const start = newCandles[startIndex]?.timestamp;
-                          const end = newCandles[newCandles.length - 1]?.timestamp;
-                          if (start && end) {
-                            dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-                            setHasZoomedInitially(true);
+            // Worker kullanarak chart verisi oluştur
+            try {
+              //console.log('🔧 Creating chart data with worker...');
+              const chartData = await window.electronAPI.getChartData({
+                data: rawData,
+                timeUnit: timeIntervalRef.current.timeUnit,
+                count: timeIntervalRef.current.count,
+                chartType: 'candlestick'
+              }) as CandleData[];
+              
+              //console.log('📈 Chart data created:', { candleCount: chartData?.length || 0 });
+              
+              if(chartData.length > 0){
+                let isMounted = true;
+                const chart = chartRef.current;
+                try {
+                  if (
+                    chart &&
+                    chartData.length > 0 &&
+                    rootRef.current &&
+                    typeof chart.get === 'function' &&
+                    !(typeof chart.isDisposed === 'function' && chart.isDisposed())
+                  ) {
+                    const valueSeries = chart.get('stockSeries');
+                    const volumeSeries = chart.get('volumeSeries');
+                    if (valueSeries && volumeSeries) {          
+                      //console.log('📊 Updating chart with data...');
+                      valueSeries.data.setAll(chartData);  
+                      volumeSeries.data.setAll(chartData);
+                      console.log(chartData.length)
+                      console.log(hasZoomedInitially)
+                      // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
+                      if (!hasZoomedInitially && chartData.length > 199) {
+                        valueSeries.events.once("datavalidated", function() {
+                          if (dateAxisRef.current) {
+                            const startIndex = Math.max(0, chartData.length - 200);
+                            const start = chartData[startIndex]?.timestamp;
+                            const end = chartData[chartData.length - 1]?.timestamp;
+                            if (start && end) {
+                              console.log('🔍 Setting initial zoom...');
+                              dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+                              setHasZoomedInitially(true);
+                            }
                           }
-                        }
-                      });
-                    }
-                  } 
+                        });
+                      } 
+                    } 
+                  }
+                } catch (err) {
+                  console.error('❌ Chart update error (possibly disposed):', err);
                 }
-              } catch (err) {
-                console.error('Chart update error (possibly disposed):', err);
+                return () => { isMounted = false; };
               }
-              return () => { isMounted = false; };
+            } catch (error) {
+              console.error('❌ Worker chart data processing error:', error);
             }
           }
         })
       .catch(error => {
-        console.error('Geçmiş veriler çekilirken hata:', error);
+        console.error('❌ Geçmiş veriler çekilirken hata:', error);
       })
     // Handle MQTT data
-    const handleMqttData = (data: string) => {
+    const handleMqttData = async (data: string) => {
       try {
-        const parsedData = JSON.parse(data);
-        if (!Array.isArray(parsedData)) return;
-        
-        const variableIndex = variableConfig.index;
-        if (variableIndex === undefined) return;
-        const value = parsedData[variableIndex + 1];
-        if (value === undefined) return;
-
-        const timestamp = new Date(parsedData[0]).getTime();
-
+        const result = await window.electronAPI.processMqttData(data, variableConfig);
+        if (!result) {
+          return;
+        }
+        const { timestamp } = result;
+        const value = selectedVariable === "p" ? Math.abs(result.value) : result.value; // p değişkeni için pozitife çevir
         setDataBuffer(prev => [...prev, { timestamp, value }]);
-        // Get current time interval
         const { timeUnit, count } = timeIntervalRef.current;
         const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
         const roundedTime = Math.floor(timestamp / ms) * ms;
-
-        // Get the chart and series
         const chart = chartRef.current;
-        if (!chart) return;
-        const valueSeries = chart.get('stockSeries');
-        const volumeSeries = chart.get('volumeSeries');
-        if (!valueSeries) return;
-
-        // Find the current candle for this time interval
-        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime);
-        
+        if (!chart) {
+          console.warn('⚠️ Chart not available for MQTT update');
+          return;
+        }
+        const valueSeries = chart.get("stockSeries");
+        const volumeSeries = chart.get("volumeSeries");
+        if (!valueSeries) {
+          console.warn('⚠️ Value series not available');
+          return;
+        }
+        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime) as CandleData | undefined;
         if (currentCandle) {
-          // Update existing candle
-          const updatedCandle = {
+          const updatedCandle: CandleData = {
             ...currentCandle,
             high: Math.max(currentCandle.high, value),
             low: Math.min(currentCandle.low, value),
@@ -278,8 +312,8 @@ const Overview: React.FC = () => {
           valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
           volumeSeries?.data.setIndex(volumeSeries.data.indexOf(currentCandle), updatedCandle);
         } else {
-          // Create new candle
-          const newCandle = {
+
+          const newCandle: CandleData = {
             timestamp: roundedTime,
             open: value,
             high: value,
@@ -290,17 +324,21 @@ const Overview: React.FC = () => {
           valueSeries.data.push(newCandle);
           volumeSeries?.data.push(newCandle);
         }
-
       } catch (error) {
-        console.error('Error parsing MQTT data:', error);
+        console.error("❌ Worker üzerinden MQTT verisi işlenirken hata:", error);
       }
     };
+    
     // Subscribe to MQTT updates
+    if(selectedIl === "zenon"){
+      return;
+    }
     const mqttIl = capitalize(selectedIl);
     const mqttGes = capitalize(selectedGes);
     const cihazGrubu = getCihazGrubu(selectedArac);
     if (cihazGrubu) {
       const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
+      console.log('📡 Subscribing to MQTT topic:', topic);
       window.electronAPI.subscribeMqtt(topic);
       const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
         if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
@@ -309,64 +347,30 @@ const Overview: React.FC = () => {
       });
 
       return () => {
-        if (typeof unsubscribe === 'function') unsubscribe();
+        console.log('📡 Unsubscribing from MQTT topic:', topic);
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
       };
+    } else {
+      console.warn('⚠️ No device group found for:', selectedArac);
     }
   }, [selectedVariable]);
+
   // Ana effect - selectedVariable değişikliğini dinler
   useEffect(() => {
     if (!selectedVariable) return;
-    // Create root element
     const root = am5.Root.new("chartdiv");
-    rootRef.current = root;
-    // Create custom theme
-    const myTheme = am5.Theme.new(root);
-    // Dark theme settings
-    myTheme.rule("Grid", ["scrollbar", "minor"]).setAll({
-      visible: false
-    });
-    myTheme.rule("ColorSet").setAll({
-      colors: [
-        am5.color("#a259ff"), // Açık mor
-        am5.color("#43e0ff"), // Açık mavi
-        am5.color("#6a11cb"), // Koyu mor
-        am5.color("#2575fc"), // Koyu mavi
-        am5.color("#ffe082"), // Sarı (vurgulu)
-      ]
-    });
-    // Text and UI element colors
-    myTheme.rule("Label").setAll({
-      fill: am5.color("#ffffff"),
-      fontSize: "0.9em"
-    });
-    myTheme.rule("AxisRenderer").setAll({
-      stroke: am5.color("#ffffff"),
-      strokeOpacity: 0.6
-    });
-    myTheme.rule("Grid").setAll({
-      stroke: am5.color("#ffffff"),
-      strokeOpacity: 0.1
-    });
-    // Set themes
+    rootRef.current = root;  
     root.setThemes([
-      am5themes_Animated.new(root),
-      myTheme
+      am5themes_Animated.new(root)
     ]);
-    // Create stock chart
     const stockChart = root.container.children.push(
       am5stock.StockChart.new(root, {
         paddingRight: 0,
-        background: am5.Rectangle.new(root, {
-          fill: am5.color("#1a1a1a"),
-          fillOpacity: 1
-        })
       })
     );
-
-    // Set global number format
     root.numberFormatter.set("numberFormat", "#,###.00");
-
-    // Create main stock panel (chart)
     const mainPanel = stockChart.panels.push(
       am5stock.StockPanel.new(root, {
         wheelY: "zoomX",
@@ -374,7 +378,6 @@ const Overview: React.FC = () => {
         panY: true,
       })
     );
-    //console.log("çok mu çağırıyor effecti")
     const dateAxis = mainPanel.xAxes.push(
       am5xy.GaplessDateAxis.new(root, {
         baseInterval: {
@@ -390,8 +393,6 @@ const Overview: React.FC = () => {
     );
     
     dateAxisRef.current = dateAxis;
-
-    // Create value axis
     const valueAxis = mainPanel.yAxes.push(
       am5xy.ValueAxis.new(root, {
         renderer: am5xy.AxisRendererY.new(root, {
@@ -405,7 +406,7 @@ const Overview: React.FC = () => {
     );
   
     valueAxisRef.current = valueAxis;
-    // Create series
+
     const valueSeries = mainPanel.series.push(
       am5xy.CandlestickSeries.new(root, {
         name: selectedArac || "Seçili Cihaz",
@@ -425,11 +426,7 @@ const Overview: React.FC = () => {
         })
       })
     );
-
-    // Set main value series
     stockChart.set("stockSeries", valueSeries);
-
-    // Add legend
     const valueLegend = mainPanel.plotContainer.children.push(
       am5stock.StockLegend.new(root, {
         stockChart: stockChart,
@@ -444,8 +441,6 @@ const Overview: React.FC = () => {
         })
       })
     );
-
-    // Style legend labels
     valueLegend.labels.template.setAll({
       fill: am5.color("#666666"),
       fontSize: "12px"
@@ -563,15 +558,10 @@ const Overview: React.FC = () => {
         ]
       });
     }
-
     // Save references
     chartRef.current = stockChart;
-
     // Initialize with empty data
     valueSeries.data.setAll([]);
-    
-
-
     // Cleanup
     return () => {
       
@@ -579,109 +569,50 @@ const Overview: React.FC = () => {
         rootRef.current.dispose();
       }
     };
-  
   }, [selectedVariable]);
 
   // Geçmiş veri yükleme fonksiyonu
   const loadHistoricalData = useCallback(async (startTime: Date, endTime: Date) => {
-    console.log("çekiliyoor")
+    console.log("çekiliyoor");
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable || isLoadingHistoricalData) return;
-    
     setIsLoadingHistoricalData(true);
-    const dbName = `${selectedIl}_${selectedGes}`;   
+    const dbName = `${selectedIl}_${selectedGes}`;
+  
     try {
-      const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTime, endTime);
+      // Türkiye saati için özel format
+      const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+      const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+      
+      const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTimeStr, endTimeStr);
+  
       if (records && records.length > 0) {
-        const newData = records
-          .map(record => {
-            const value = record[selectedVariable];
-            const numValue = Number(value);
-            const timestamp = new Date(record.timestamp).getTime();
-            return {
-              timestamp: timestamp,
-              value: numValue
-            };
-          })
-          .filter((item): item is { timestamp: number; value: number } => item !== null)
+        const newData: ChartDataPoint[] = records
+          .map(record => ({
+            timestamp: new Date(record.timestamp).getTime(),
+            value: selectedVariable === "p" ? Math.abs(Number(record[selectedVariable])) : Number(record[selectedVariable]) // p değişkeni için pozitife çevir
+          }))
+          .filter(d => !isNaN(d.value))
           .sort((a, b) => a.timestamp - b.timestamp);
-        setDataBuffer(prev => [...newData,...prev]);
-
-        // Zaman aralığına göre timestamp'i yuvarla
-        const getRoundedTimestamp = (timestamp: number) => {
-          const { timeUnit, count } = timeIntervalRef.current;
-          const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-          return Math.floor(timestamp / ms) * ms;
-        };
-
-        // Seçilen zaman aralığına göre gruplama
-        const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-        
-        newData.forEach(d => {
-          const roundedTime = getRoundedTimestamp(d.timestamp);
-          if (!grouped.has(roundedTime)) {
-            grouped.set(roundedTime, { values: [], timestamps: [] });
+  
+        setDataBuffer(prev => [...newData, ...prev]);
+  
+        const chartData = await window.electronAPI.getChartData({
+          data: newData,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'candlestick'
+        }) as CandleData[];
+  
+        if (chartData.length > 0 && chartRef.current) {
+          const valueSeries = chartRef.current.get('stockSeries');
+          const volumeSeries = chartRef.current.get('volumeSeries');
+  
+          if (valueSeries && volumeSeries) {
+            const existingData = valueSeries.data.values as CandleData[];
+            const combinedData = [...chartData, ...existingData];
+            valueSeries.data.setAll(combinedData);
+            volumeSeries.data.setAll(combinedData);
           }
-          const group = grouped.get(roundedTime)!;
-          group.values.push(d.value);
-          group.timestamps.push(d.timestamp);
-        });
-
-        // Her zaman aralığı için bir mum oluştur
-        const historicalCandles = Array.from(grouped.entries())
-          .filter(([_, group]) => group.values.length > 0)
-          .sort(([timeA], [timeB]) => timeA - timeB)
-          .map(([time, group]) => {
-            const values = group.values;
-            if (values.length === 0) return null;
-            
-            const open = values[0];
-            const close = values[values.length - 1];
-            const high = Math.max(...values);
-            const low = Math.min(...values);
-            
-            if (isNaN(open) || isNaN(close) || isNaN(high) || isNaN(low)) {
-              console.log('Invalid candle values:', { time, open, close, high, low });
-              return null;
-            }
-            
-            return {
-              timestamp: time,
-              open,
-              high,
-              low,
-              close,
-              volume: values.length
-            };
-          })
-          .filter((candle): candle is NonNullable<typeof candle> => candle !== null);
-        
-        if(historicalCandles.length > 0){
-          let isMounted = true;
-          const chart = chartRef.current;
-          try {
-            if (
-              chart &&
-              historicalCandles.length > 0 &&
-              rootRef.current &&
-              typeof chart.get === 'function' &&
-              !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-            ) {
-              const valueSeries = chart.get('stockSeries');
-              const volumeSeries = chart.get('volumeSeries');
-              if (valueSeries && volumeSeries) {
-                //console.log("valueseries before",valueSeries.data.length);
-                //console.log("historicalCandles",historicalCandles);
-                const existingData = valueSeries.data.values;
-                const combinedData = [...historicalCandles, ...existingData];
-                valueSeries.data.setAll(combinedData);
-                volumeSeries.data.setAll(combinedData);
-                //console.log("valueseries after",valueSeries.data.length);
-              }
-            }
-          } catch (err) {
-            console.error('Historical chart update error:', err);
-          }
-          return () => { isMounted = false; };
         }
       }
     } catch (error) {
@@ -692,74 +623,135 @@ const Overview: React.FC = () => {
   }, [selectedVariable]);
 
   const addComparisonLine = async (key: string, variableName: string) => {
-    if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) return;
-   
+    console.log(`📊 Adding comparison line:`, { key, variableName });
+    if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) {
+      console.warn('⚠️ Chart references not ready for comparison line.');
+      return;
+    }
+  
     const chart = chartRef.current;
     const mainPanel = chart.panels.getIndex(0);
     if (!mainPanel) return;
-
+  
     const [il, ges, arac] = key.split('/');
     const dbName = `${il}_${ges}`;
     const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
-    console.log("addComparisonLine çalıştı",key, variableName)
-    if (!variableConfig) return;
-
+    if (!variableConfig) {
+      console.warn(`⚠️ Variable config not found for comparison line:`, { key, variableName });
+      return;
+    }
+  
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10 * 60 * 60 * 1000); // son 10 saat
-
-    const records = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTime, endTime);
-
-    const lineData = records.map(record => {
-      const value = Number(record[variableName]);
-      const timestamp = new Date(record.timestamp).getTime();
-      return { timestamp, value };
-    }).filter(d => !isNaN(d.value));
-
+    console.log(`📥 Fetching historical data for comparison line:`, { dbName, arac, startTime, endTime });
+    
+    // Türkiye saati için özel format
+    const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+    const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+    
+    const rawRecords = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTimeStr, endTimeStr);
+    console.log(`✅ Historical data received for comparison line:`, { recordCount: rawRecords?.length || 0 });
+  
+    const rawData: ChartDataPoint[] = rawRecords.map(record => ({
+      timestamp: new Date(record.timestamp).getTime(),
+      value: variableName === "p" ? Math.abs(Number(record[variableName])) : Number(record[variableName]) // p değişkeni için pozitife çevir
+    })).filter(d => !isNaN(d.value));
+  
+    console.log(`🔧 Creating chart data for comparison line with worker...`);
+    const lineData = await window.electronAPI.getChartData({
+      data: rawData,
+      timeUnit: timeIntervalRef.current.timeUnit,
+      count: timeIntervalRef.current.count,
+      chartType: 'line'
+    }) as ChartDataPoint[];
+    //console.log(`📈 Chart data created for comparison line:`, { dataPointCount: lineData?.length || 0 });
+  
+    // Renk seçimi - mevcut karşılaştırma serilerinin sayısına göre
+    const currentComparisonCount = comparisonSeriesRefs.current.length;
+    const colorIndex = currentComparisonCount % COMPARISON_COLORS.length;
+    const selectedColor = COMPARISON_COLORS[colorIndex];
+  
     const series = am5xy.LineSeries.new(rootRef.current, {
       name: `${key}-${variableName}`,
       valueXField: "timestamp",
       valueYField: "value",
       xAxis: dateAxisRef.current,
       yAxis: valueAxisRef.current,
-      stroke: am5.color("#ffe082"),
+      stroke: am5.color(selectedColor),
       tooltip: am5.Tooltip.new(rootRef.current, {
-        labelText: `{name}\n[bold]{valueY}[/]`
+        labelText: `{name}\n[bold]{valueY}[/]`,
+        pointerOrientation: "horizontal"
       })
     });
 
+    // Çizgi kalınlığı ve şeffaflığını ayarla
+    series.strokes.template.setAll({
+      strokeWidth: 2,
+      strokeOpacity: 0.8
+    });
+  
     series.data.setAll(lineData);
     mainPanel.series.push(series);
     comparisonSeriesRefs.current.push(series);
-
-    // MQTT canlı veri kısmı
+  
+    // MQTT aboneliği
     const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
     const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
     const cihazGrubu = getCihazGrubu(arac);
     if (!cihazGrubu) return;
-
+  
     const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
+    console.log(`📡 Subscribing to MQTT for comparison line:`, { topic });
     await window.electronAPI.subscribeMqtt(topic);
-
-    const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
+  
+    const unsubscribe = window.electronAPI.onMqttData(async (data, incomingTopic) => {
       if (incomingTopic?.toLowerCase() === topic.toLowerCase()) {
         try {
-          const parsed = JSON.parse(data);
-          const variableIndex = variableConfig.index;
-          const value = parsed[variableIndex + 1];
-          const timestamp = new Date(parsed[0]).getTime();
-          if (isNaN(value) || isNaN(timestamp)) return;
-          series.data.push({ timestamp, value });
+          const result = await window.electronAPI.processMqttData(data, variableConfig);
+          if (!result) return;
+          const { timestamp } = result;
+          const value = variableName === "p" ? Math.abs(result.value) : result.value; // p değişkeni için pozitife çevir
+          
+          const { timeUnit, count } = timeIntervalRef.current;
+          const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+          const roundedTime = Math.floor(timestamp / ms) * ms;
+
+          const lastPoint: any = series.data.getIndex(series.data.length - 1);
+
+          if (lastPoint && lastPoint.timestamp === roundedTime) {
+            // Mevcut zaman aralığındaki noktanın ortalamasını güncelle
+            const currentSum = lastPoint._sum || lastPoint.value;
+            const currentCount = lastPoint._count || 1;
+            
+            const newSum = currentSum + value;
+            const newCount = currentCount + 1;
+
+            series.data.setIndex(series.data.length - 1, {
+              timestamp: roundedTime,
+              value: newSum / newCount,
+              _sum: newSum,
+              _count: newCount
+            });
+          } else {
+            // Yeni zaman aralığı için yeni bir nokta ekle
+            series.data.push({
+              timestamp: roundedTime,
+              value: value,
+              _sum: value,
+              _count: 1
+            });
+          }
         } catch (err) {
-          console.error("MQTT comparison parse error:", err);
+          console.error("❌ MQTT comparison parse error:", err);
         }
       }
     });
-
+  
     if (typeof unsubscribe === "function") {
       comparisonUnsubscribeRefs.current.push(unsubscribe);
     }
   };
-
+  
   // Karşılaştırma serilerini yönetmek için useEffect
   useEffect(() => {
     // Önceki ve mevcut seçimleri karşılaştır
@@ -812,6 +804,7 @@ const Overview: React.FC = () => {
 
   // DateAxis için event listener
   useEffect(() => {
+    console.log("hasZoomedInitially - dateaxis esueffect",hasZoomedInitially)
     if (!dateAxisRef.current && !hasZoomedInitially) {
       return;
     }
@@ -860,7 +853,7 @@ const Overview: React.FC = () => {
   useEffect(() => {
     const hours = new Set<string>();
     dataBuffer.forEach((d: any) => {
-      const date = new Date(d.timestamp+3*60*60*1000);
+      const date = new Date(d.timestamp);
       if (date.getMinutes() === 0 && date.getSeconds() === 0) {
         hours.add(date.toISOString());
       }
@@ -880,123 +873,342 @@ const Overview: React.FC = () => {
     // Önce mevcut verileri temizle
     valueSeries.data.clear();
 
-    // Zaman aralığına göre timestamp'i yuvarla
-    const getRoundedTimestamp = (timestamp: number) => {
-      const { timeUnit, count } = timeIntervalRef.current;
-      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-      return Math.floor(timestamp / ms) * ms;
+    // Worker kullanarak yeni chart verisi oluştur
+    const processChartData = async () => {
+      try {
+        const chartData = await window.electronAPI.getChartData({
+          data: dataBuffer,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'candlestick'
+        }) as CandleData[];
+
+        const volumeSeries = chart.get('volumeSeries');
+        // Verileri güncelle
+        valueSeries.data.setAll(chartData);
+        volumeSeries?.data.setAll(chartData);
+
+        // DateAxis'i güncelle
+        if (dateAxisRef.current) {
+          dateAxisRef.current.set("baseInterval", {
+            timeUnit: timeIntervalRef.current.timeUnit,
+            count: timeIntervalRef.current.count
+          });
+        }
+
+        // Veri güncellemesi tamamlandığında zoom'u ayarla
+        valueSeries.events.once("datavalidated", function() {
+          if (dateAxisRef.current && chartData.length > 0) {
+            const start = chartData[0].timestamp;
+            const end = chartData[chartData.length - 1].timestamp;
+            dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
+          }
+        });
+      } catch (error) {
+        console.error('Worker chart data processing error in timeInterval effect:', error);
+      }
     };
 
-    // Seçilen zaman aralığına göre gruplama
-    const grouped = new Map<number, { values: number[]; timestamps: number[] }>();
-    dataBuffer.forEach((d: any) => {
-      const roundedTime = getRoundedTimestamp(d.timestamp);
-      if (!grouped.has(roundedTime)) {
-        grouped.set(roundedTime, { values: [], timestamps: [] });
-      }
-      const group = grouped.get(roundedTime)!;
-      group.values.push(d.value);
-      group.timestamps.push(d.timestamp);
-    });
-
-    // Her zaman aralığı için yeni mum oluştur
-    const newCandles = Array.from(grouped.entries())
-      .filter(([_, group]) => group.values.length > 0)
-      .sort(([timeA], [timeB]) => timeA - timeB)
-      .map(([time, group]) => {
-        const values = group.values;
-        return {
-          timestamp: time,
-          open: values[0],
-          high: Math.max(...values),
-          low: Math.min(...values),
-          close: values[values.length - 1],
-          volume: values.length
-        };
-      });
-
-    const volumeSeries = chart.get('volumeSeries');
-    // Verileri güncelle
-    valueSeries.data.setAll(newCandles);
-    volumeSeries?.data.setAll(newCandles);
-
-    // DateAxis'i güncelle
-    if (dateAxisRef.current) {
-      dateAxisRef.current.set("baseInterval", {
-        timeUnit: timeIntervalRef.current.timeUnit,
-        count: timeIntervalRef.current.count
-      });
-    }
-
-    // Veri güncellemesi tamamlandığında zoom'u ayarla
-    valueSeries.events.once("datavalidated", function() {
-      if (dateAxisRef.current && newCandles.length > 0) {
-        const start = newCandles[0].timestamp;
-        const end = newCandles[newCandles.length - 1].timestamp;
-        dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-      }
-    });
+    processChartData();
 
     return () => {
       // Cleanup function if needed
     };
   }, [timeIntervalRef.current]);
 
+  // Grafiği en sağa kaydırma fonksiyonu
+  const scrollToEnd = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
 
-  
+    const valueSeries = chart.get('stockSeries');
+    if (!valueSeries) return;
+
+    const seriesData = valueSeries.data.values as { timestamp: number }[];
+    if (!seriesData || seriesData.length === 0) return;
+
+    // En son veri noktasını bul
+    const lastDataPoint = seriesData[seriesData.length - 1];
+    const lastTimestamp = lastDataPoint.timestamp;
+
+    // Grafiği en son veri noktasına odakla
+    if (dateAxisRef.current) {
+      const endDate = new Date(lastTimestamp);
+      
+      // Zaman aralığına göre başlangıç tarihini ayarla
+      const { timeUnit, count } = timeIntervalRef.current;
+      const intervalMs = timeUnit === "minute" ? count * 60 * 1000 : count * 60 * 60 * 1000;
+      const viewWindowMs = intervalMs * 200; // 200 veri noktası için gerekli süre
+      
+      const startDate = new Date(lastTimestamp - viewWindowMs);
+      
+      // Grafiği yumuşak bir şekilde kaydır
+      dateAxisRef.current.zoomToDates(startDate, endDate);
+      
+      console.log('📈 Grafik en sağa kaydırıldı:', { 
+        startDate: startDate.toISOString(), 
+        endDate: endDate.toISOString(),
+        dataPoints: seriesData.length 
+      });
+    }
+  }, [timeIntervalRef.current]);
+
+  const handleMainSeriesSelect = (il: string, ges: string, arac: string, variable: string) => {
+    setSelectedIl(il);
+    setSelectedGes(ges);
+    setSelectedArac(arac);
+    setSelectedVariable(variable);
+    if (il && ges && arac && variable) {
+      setMainSeriesConfig({ il, ges, arac, variable, color: "#8884d8" });
+    }
+  };
+
+  const handleComparisonSeriesSelect = (il: string, ges: string, arac: string, variables: string[]) => {
+    // Ayrı state'leri güncelle
+    setSelectedComparisonIl(il);
+    setSelectedComparisonGes(ges);
+    setSelectedComparisonArac(arac);
+    
+    const key = `${il}/${ges}/${arac}`;
+    setComparisonSelections(prev => {
+      const updated = { ...prev };
+      if (variables.length > 0) {
+        updated[key] = variables;
+      } else {
+        delete updated[key];
+      }
+      return updated;
+    });
+  };
+
+  // Karşılaştırma çizgisinin rengini değiştir
+  const changeComparisonLineColor = (seriesName: string, newColor: string) => {
+    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    if (series) {
+      series.set("stroke", am5.color(newColor));
+      // Renk state'ini güncelle
+      setComparisonColors(prev => ({
+        ...prev,
+        [seriesName]: newColor
+      }));
+    }
+  };
+
+  // Karşılaştırma çizgisinin stilini değiştir (kesikli, düz, noktalı)
+  const changeComparisonLineStyle = (seriesName: string, style: 'solid' | 'dashed' | 'dotted') => {
+    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    if (series) {
+      const dashArray = style === 'dashed' ? [5, 5] : style === 'dotted' ? [2, 2] : undefined;
+      series.strokes.template.set("strokeDasharray", dashArray);
+      setComparisonStyles(prev => ({
+        ...prev,
+        [seriesName]: { ...(prev[seriesName] || { width: 2, style: 'solid' }), style }
+      }));
+    }
+  };
+
+  // Karşılaştırma çizgisinin kalınlığını değiştir
+  const changeComparisonLineWidth = (seriesName: string, width: number) => {
+    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    if (series) {
+      series.strokes.template.set("strokeWidth", width);
+      setComparisonStyles(prev => ({
+        ...prev,
+        [seriesName]: { ...(prev[seriesName] || { width: 2, style: 'solid' }), width }
+      }));
+    }
+  };
+
+  // Popup sürükleme işlevselliği
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Sadece sol tıklamayı dikkate al
+    if (e.button !== 0) return;
+
+    const target = e.target as HTMLElement;
+
+    // Sadece başlık (h4) veya kapalı ikon üzerinden sürüklemeyi başlat
+    if (target.closest('h4') || target.closest('.settings-toggle-btn')) {
+        setIsDragging(true);
+        dragStartRef.current = {
+            x: e.clientX - popupPosition.x,
+            y: e.clientY - popupPosition.y
+        };
+        e.preventDefault();
+    }
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (isDragging) {
+      const newX = e.clientX - dragStartRef.current.x;
+      const newY = e.clientY - dragStartRef.current.y;
+      
+      const elementWidth = showSettings ? popupRef.current?.offsetWidth : 44;
+      const elementHeight = showSettings ? popupRef.current?.offsetHeight : 44;
+
+      const maxX = window.innerWidth - (elementWidth || 44);
+      const maxY = window.innerHeight - (elementHeight || 44);
+      
+      setPopupPosition({
+        x: Math.max(0, Math.min(newX, maxX)),
+        y: Math.max(0, Math.min(newY, maxY))
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Mouse event listener'ları ekle/çıkar
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging]);
+
+  // Popup'ın başlangıç pozisyonunu ayarla
+  useEffect(() => {
+    if (showSettings && popupRef.current && !isInitialPositionSet) {
+      const popupHeight = popupRef.current.offsetHeight;
+      setPopupPosition({ x: 10, y: window.innerHeight - popupHeight - 20 });
+      setIsInitialPositionSet(true);
+    }
+  }, [showSettings, isInitialPositionSet]);
 
   return (
     <div className="overview-container">
-      <div className="selection-container">
-        <NestedDropdown
-          dropdownData={dropdownData}
-          onSelect={(il, ges, arac, variable) => {
-            console.log("onSelect",il, ges, arac, variable);
-            setSelectedIl(il);
-            setSelectedGes(ges);
-            setSelectedArac(arac);
-            setSelectedVariable(variable);
-            setHasZoomedInitially(false);
-          }}
-          selectedIl={selectedIl}
-          selectedGes={selectedGes}
-          selectedArac={selectedArac}
-          selectedVariable={selectedVariable}
-        />
-        <ComparisonSeriesNestedDropdown
-          dropdownData={dropdownData}
-          onSelect={(il, ges, arac, variables) => {
-            // UI için il, ges, arac seçimlerini güncelle
-            if (il) setSelectedComparisonIl(il);
-            if (ges) setSelectedComparisonGes(ges);
-            if (arac) setSelectedComparisonArac(arac);
+      <div className="chart-controls">
+        <div className="control-group">
+          <label>Ana Değer Seç</label>
+          <MainSeriesNestedDropdown
+            dropdownData={dropdownData}
+            onSelect={handleMainSeriesSelect}
+            selectedIl={selectedIl}
+            selectedGes={selectedGes}
+            selectedArac={selectedArac}
+            selectedVariable={selectedVariable}
+          />
+        </div>
+        <div className="control-group">
+          <label>+ Karşılaştır</label>
+          <ComparisonSeriesNestedDropdown
+            dropdownData={dropdownData}
+            onSelect={handleComparisonSeriesSelect}
+            selectedIl={selectedComparisonIl}
+            selectedGes={selectedComparisonGes}
+            selectedArac={selectedComparisonArac}
+            selectedVariables={comparisonSelections}
+          />
+        </div>
 
-            // Değişken seçimlerini güncelle
-     
-            setComparisonSelections(prev => {
-              const updated = { ...prev };
-              const key = `${il}/${ges}/${arac}`;
-              if (variables.length > 0) {
-                updated[key] = variables;
-              } else {
-                // Hiç değişken seçili değilse anahtarı tamamen sil
-                delete updated[key];
-              }
-              return updated;
-            });
-            
-          }}
-          selectedIl={selectedComparisonIl}
-          selectedGes={selectedComparisonGes}
-          selectedArac={selectedComparisonArac}
-          selectedVariables={comparisonSelections}
-        />
+        {/* This div is for AmCharts' own toolbar (zoom, draw, etc.) */}
+        <div id="chartcontrols" className="amcharts-toolbar-container" />
+        
+        <div className="chart-controls-right">
+          <button 
+            onClick={scrollToEnd}
+            className="scroll-to-end-btn"
+            title="Grafiği en son veri noktasına kaydır"
+          >
+            ➡️ En Sağa Kaydır
+          </button>
+        </div>
       </div>
-      <div id="chartcontrols" className="chart-controls"></div>
-      <div id="chartdiv" className="chart-container"></div>
+      
+      <div id="chartdiv" className="chart-container">
+        {/* Karşılaştırma çizgi ayarları */}
+        {comparisonSeriesRefs.current.length > 0 && showSettings && (
+          <div 
+            ref={popupRef}
+            className={`comparison-line-settings ${isDragging ? 'dragging' : ''}`}
+            style={{
+              left: `${popupPosition.x}px`,
+              top: `${popupPosition.y}px`
+            }}
+            onMouseDown={handleMouseDown}
+          >
+            <h4>
+              Karşılaştırma Çizgi Ayarları
+              <button 
+                className="close-btn"
+                onClick={() => setShowSettings(false)}
+                title="Ayarları kapat"
+              >
+                ×
+              </button>
+            </h4>
+            {/* @ts-ignore */}
+            {comparisonSeriesRefs.current
+              .filter(series => series && !series.isDisposed())
+              .map((series, index) => {
+              const seriesName = series.get("name") as string;
+              const displayName = seriesName
+                .split('/')
+                .pop()
+                ?.replace(/-/g, ' ') || seriesName;
+              
+              const currentColor = comparisonColors[seriesName] || COMPARISON_COLORS[index % COMPARISON_COLORS.length];
+              
+              return (
+                <div key={seriesName} className="comparison-line-item">
+                  <label title={seriesName}>{displayName}</label>
+                  <input
+                    type="color"
+                    className="color-picker"
+                    value={currentColor}
+                    onChange={(e) => changeComparisonLineColor(seriesName, e.target.value)}
+                    title="Renk seç"
+                  />
+                  <select
+                    className="line-style-select"
+                    defaultValue={series.strokes.template.get("strokeDasharray") ? "dashed" : "solid"}
+                    onChange={(e) => changeComparisonLineStyle(seriesName, e.target.value as 'solid' | 'dashed' | 'dotted')}
+                    title="Çizgi stili"
+                  >
+                    <option value="solid">Düz</option>
+                    <option value="dashed">Kesikli</option>
+                    <option value="dotted">Noktalı</option>
+                  </select>
+                  <input
+                    type="number"
+                    className="line-width-input"
+                    min="1"
+                    max="10"
+                    defaultValue={series.strokes.template.get("strokeWidth")}
+                    onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
+                    title="Çizgi kalınlığı"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        
+        {/* Ayarları tekrar açma butonu */}
+        {comparisonSeriesRefs.current.length > 0 && !showSettings && (
+          <button
+            className="settings-toggle-btn"
+            style={{
+              left: `${popupPosition.x}px`,
+              top: `${popupPosition.y}px`,
+            }}
+            onClick={() => setShowSettings(true)}
+            onMouseDown={handleMouseDown}
+            title="Çizgi ayarlarını aç"
+          >
+            ⚙️
+          </button>
+        )}
+      </div>
     </div>
   );
 };
-
 export default Overview;
+
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./Overview.css";
 
 export type VariableConfig = {
@@ -26,141 +26,124 @@ const ComparisonSeriesNestedDropdown: React.FC<ComparisonSeriesNestedDropdownPro
   selectedVariables,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const handleIlSelect = (il: string) => {
-    // Sadece UI güncellemesi için
-    onSelect(il, "", "", []);
-  };
-
-  const handleGesSelect = (ges: string) => {
-    // Sadece UI güncellemesi için
-    onSelect(selectedIl, ges, "", []);
-  };
-
-  const handleAracSelect = (arac: string) => {
-    // Mevcut değişken seçimlerini koru
-    const existingVars = selectedVariables[`${selectedIl}/${selectedGes}/${arac}`] || [];
-    
-    // Değişken seçimlerini koruyarak onSelect'i çağır
-    onSelect(selectedIl, selectedGes, arac, existingVars);
-  };
-
-  const handleVariableToggle = (variableName: string) => {
-    const key = `${selectedIl}/${selectedGes}/${selectedArac}`;
+  const handleVariableToggle = (il: string, ges: string, arac: string, variableName: string) => {
+    const key = `${il}/${ges}/${arac}`;
     const currentVars = selectedVariables[key] || [];
     const newVariables = currentVars.includes(variableName)
       ? currentVars.filter(v => v !== variableName)
       : [...currentVars, variableName];
-    // Değişken seçimi değiştiğinde onSelect çağır
-    onSelect(selectedIl, selectedGes, selectedArac, newVariables);
-  };
-
-  const toggleDropdown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsOpen((prev) => !prev);
+    onSelect(il, ges, arac, newVariables);
   };
 
   useEffect(() => {
-    console.log("selectedVariables", selectedVariables);
-  }, [selectedVariables]);
-  useEffect(() => {
-    const handleClickOutside = () => setIsOpen(false);
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const getDropdownLabel = () => {
+    const totalSelectedCount = Object.values(selectedVariables).reduce((acc, vars) => acc + vars.length, 0);
+    return totalSelectedCount > 0 ? `${totalSelectedCount} Değer Karşılaştırılıyor` : "+ Karşılaştır";
+  };
+
   const ilList = Object.keys(dropdownData || {});
-  const selectedIlIndex = ilList.indexOf(selectedIl);
-  const gesList = selectedIl && dropdownData?.[selectedIl] ? Object.keys(dropdownData[selectedIl]) : [];
-  const selectedGesIndex = gesList.indexOf(selectedGes);
-  const aracList = selectedIl && selectedGes && dropdownData?.[selectedIl]?.[selectedGes] 
-    ? Object.keys(dropdownData[selectedIl][selectedGes]) 
-    : [];
-  const selectedAracIndex = aracList.indexOf(selectedArac);
-
-  const renderList = useCallback((items: string[], selectedItem: string, level: number, onClickHandler: (item: string) => void) => (
-    <ul>
-      {items.map((item) => (
-        <li
-          key={item}
-          className={`has-submenu${selectedItem === item ? " selected" : ""}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClickHandler(item);
-          }}
-        >
-          {item}
-        </li>
-      ))}
-    </ul>
-  ), []);
-
-  const getSelectedVarsForCurrentSelection = useCallback(() => {
-    if (!selectedIl || !selectedGes || !selectedArac) return [];
-    const key = `${selectedIl}/${selectedGes}/${selectedArac}`;
-    return selectedVariables?.[key] || [];
-  }, [selectedIl, selectedGes, selectedArac, selectedVariables]);
-
-  const getDropdownLabel = useCallback(() => {
-    if (!selectedGes) return "+ Ekle";
-    
-    const selectedVars = getSelectedVarsForCurrentSelection();
-    const varLabel = selectedVars.length ? ` / ${selectedVars.join(", ")}` : "";
-    
-    return `${selectedGes}${selectedArac ? ` / ${selectedArac}${varLabel}` : ""}`;
-  }, [selectedGes, selectedArac, getSelectedVarsForCurrentSelection]);
+  const gesList = selectedIl ? Object.keys(dropdownData[selectedIl] || {}) : [];
+  const aracList = (selectedIl && selectedGes) ? Object.keys(dropdownData[selectedIl]?.[selectedGes] || {}) : [];
+  const variableList = (selectedIl && selectedGes && selectedArac) ? dropdownData[selectedIl][selectedGes][selectedArac] : [];
+  
+  const getSubmenuPosition = (triggerRef: HTMLLIElement | null) => {
+    if (!menuRef.current || !triggerRef) return {};
+    const menuRect = menuRef.current.getBoundingClientRect();
+    const triggerRect = triggerRef.getBoundingClientRect();
+    return { 
+      top: triggerRect.top - menuRect.top
+    };
+  };
+  
+  const ilRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const gesRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const aracRefs = useRef<(HTMLLIElement | null)[]>([]);
 
   return (
-    <div className="nested-dropdown" style={{ position: "relative" }}>
-      <button className="dropdown-trigger" onClick={toggleDropdown}>
+    <div className="nested-dropdown" ref={containerRef}>
+      <button className="dropdown-trigger" onClick={() => setIsOpen(!isOpen)}>
         {getDropdownLabel()}
       </button>
       {isOpen && (
-        <div className="dropdown-menu">
-          {renderList(ilList, selectedIl, 0, handleIlSelect)}
+        <div className="dropdown-menu" ref={menuRef}>
+          {/* Level 1: İl */}
+          <ul className="submenu-list">
+            {ilList.map((il, i) => (
+              <li
+                key={il}
+                ref={el => (ilRefs.current[i] = el)}
+                className={selectedIl === il ? 'selected' : ''}
+                onMouseEnter={() => onSelect(il, "", "", selectedVariables[`${il}//`] || [])}
+              >
+                <span className="submenu-label">{il}</span>
+                <span className="submenu-arrow">▶</span>
+              </li>
+            ))}
+          </ul>
 
+          {/* Level 2: GES */}
           {selectedIl && gesList.length > 0 && (
-            <div className="submenu" style={{ left: 220, top: selectedIlIndex * 48 }}>
-              {renderList(gesList, selectedGes, 1, handleGesSelect)}
-            </div>
+            <ul className="submenu-list" style={{ ...getSubmenuPosition(ilRefs.current[ilList.indexOf(selectedIl)]), left: '100%' }}>
+              {gesList.map((ges, i) => (
+                <li
+                  key={`${selectedIl}-${ges}`}
+                  ref={el => (gesRefs.current[i] = el)}
+                  className={selectedGes === ges ? 'selected' : ''}
+                  onMouseEnter={() => onSelect(selectedIl, ges, "", selectedVariables[`${selectedIl}/${ges}/`] || [])}
+                >
+                  <span className="submenu-label">{ges}</span>
+                  <span className="submenu-arrow">▶</span>
+                </li>
+              ))}
+            </ul>
           )}
 
-          {selectedIl && selectedGes && aracList.length > 0 && (
-            <div className="submenu" style={{ left: 440, top: selectedIlIndex * 48 + selectedGesIndex * 48 }}>
-              <ul>
-                {aracList.map((arac) => (
+          {/* Level 3: Araç */}
+          {selectedGes && aracList.length > 0 && (
+             <ul className="submenu-list" style={{ ...getSubmenuPosition(gesRefs.current[gesList.indexOf(selectedGes)]), left: '200%' }}>
+              {aracList.map((arac, i) => (
+                <li
+                  key={`${selectedIl}-${selectedGes}-${arac}`}
+                  ref={el => (aracRefs.current[i] = el)}
+                  className={selectedArac === arac ? 'selected' : ''}
+                  onMouseEnter={() => onSelect(selectedIl, selectedGes, arac, selectedVariables[`${selectedIl}/${selectedGes}/${arac}`] || [])}
+                >
+                  <span className="submenu-label">{arac}</span>
+                  <span className="submenu-arrow">▶</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          
+          {/* Level 4: Değişken */}
+          {selectedArac && variableList.length > 0 && (
+            <ul className="submenu-list" style={{ ...getSubmenuPosition(aracRefs.current[aracList.indexOf(selectedArac)]), left: '300%' }}>
+              {variableList.map(variable => {
+                const key = `${selectedIl}/${selectedGes}/${selectedArac}`;
+                const isChecked = (selectedVariables[key] || []).includes(variable.name);
+                return (
                   <li
-                    key={arac}
-                    className={`has-submenu${selectedArac === arac ? " selected" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAracSelect(arac);
-                    }}
+                    key={`${selectedIl}-${selectedGes}-${selectedArac}-${variable.name}`}
+                    onClick={() => handleVariableToggle(selectedIl, selectedGes, selectedArac, variable.name)}
                   >
-                    {arac}
+                    <input type="checkbox" readOnly checked={isChecked} style={{ marginRight: '8px' }}/>
+                    <span className="submenu-label">{variable.name}</span>
                   </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {selectedIl && selectedGes && selectedArac && dropdownData?.[selectedIl]?.[selectedGes]?.[selectedArac] && (
-            <div className="submenu" style={{ left: 660, top: selectedIlIndex * 48 + selectedGesIndex * 48 + selectedAracIndex * 48 }}>
-              <ul>
-                {dropdownData[selectedIl][selectedGes][selectedArac].map((variable) => (
-                  <li key={variable.name} onClick={(e) => e.stopPropagation()}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={getSelectedVarsForCurrentSelection().includes(variable.name)}
-                        onChange={() => handleVariableToggle(variable.name)}
-                      />
-                      {variable.name}
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                );
+              })}
+            </ul>
           )}
         </div>
       )}

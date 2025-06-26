@@ -1,72 +1,75 @@
 .navbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  min-width: 0;
-  box-sizing: border-box;
-  overflow-x: hidden;
-  height: 64px;
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  background: rgba(106, 17, 203, 0.7);
-  background: linear-gradient(90deg, rgba(106,17,203,0.7) 0%, rgba(37,117,252,0.7) 100%);
-  box-shadow: 0 2px 16px 0 rgba(106,17,203,0.08);
-  backdrop-filter: blur(8px);
-  z-index: 1000;
-  padding: 0 32px;
+  align-items: center;
+  padding: 0 24px;
+  height: 58px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  flex-shrink: 0; /* Prevent navbar from shrinking */
+  position: relative;
+  z-index: 10;
 }
 
-.navbar-logo {
-  color: #fff;
-  font-size: 1.3em;
-  font-weight: bold;
-  letter-spacing: 1px;
-  text-shadow: 0 2px 8px rgba(37,117,252,0.12);
+.navbar-brand h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  color: #1a202c;
+  margin: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .navbar-links {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 8px;
 }
 
-.navbar-link {
+.nav-button {
   display: flex;
   align-items: center;
-  color: #fff;
-  font-size: 1.05em;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background-color: transparent;
+  color: #4a5568;
+  font-size: 14px;
   font-weight: 500;
-  text-decoration: none;
-  padding: 8px 18px;
-  border-radius: 24px;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
 }
 
-.navbar-link.active, .navbar-link:hover {
-  background: rgba(255,255,255,0.18);
-  color: #ffe082;
-  box-shadow: 0 2px 8px 0 rgba(106,17,203,0.10);
+.nav-button:hover {
+  background-color: #f1f5f9;
+  color: #1a202c;
 }
 
-.navbar-icon {
-  margin-right: 10px;
+.nav-button.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.nav-icon {
   font-size: 1.2em;
 }
 
-@media (max-width: 600px) {
+/* Responsive Design */
+@media (max-width: 768px) {
+  .nav-text {
+    display: none; /* Hide text on small screens */
+  }
+
+  .nav-button {
+    padding: 10px;
+  }
+
   .navbar {
-    flex-direction: column;
-    height: auto;
-    padding: 8px 8px;
-  }
-  .navbar-links {
-    gap: 8px;
-  }
-  .navbar-link {
-    padding: 8px 10px;
-    font-size: 0.98em;
+    padding: 0 16px;
   }
 } 

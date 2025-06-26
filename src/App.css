@@ -1,0 +1,14 @@
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 98vh; /* Viewport Height: Ekranın tüm yüksekliği */
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.content-area {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* İçerik taşarsa kaydırma çubuğu çıksın */
+  padding: 0.5rem;
+} 

@@ -1,40 +1,37 @@
+import { MemoryRouter as Router, Routes, Route } from 'react-router-dom';
 import React, { useState } from 'react';
-import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Overview from './components/Overview/Overview';
-import Navbar from './components/Navbar/Navbar';
 import Reports from './components/Reports';
 import Settings from './components/Settings';
 import Alarms from './components/Alarms/Alarms';
+import Navbar from './components/Navbar/Navbar';
+import './App.css';
 
-const App: React.FC = () => {
+const Main = () => {
+  const [activeComponent, setActiveComponent] = useState('Overview');
+
+  return (
+    <div className="app-container">
+      <Navbar onNavClick={setActiveComponent} activeComponent={activeComponent} />
+      <main className="content-area">
+        <Alarms visible={activeComponent === 'Alarms'} />
+
+        <div style={{ display: activeComponent !== 'Alarms' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+          {activeComponent === 'Overview' && <Overview />}
+          {activeComponent === 'Reports' && <Reports />}
+          {activeComponent === 'Settings' && <Settings />}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default function App() {
   return (
     <Router>
-      <MainLayout />
+      <Routes>
+        <Route path="/" element={<Main />} />
+      </Routes>
     </Router>
   );
-};
-
-const MainLayout: React.FC = () => {
-  const location = useLocation();
-  const showAlarmUI = location.pathname === '/alarms';
-
-  return (
-    <>
-      <Navbar />
-
-      {/* Tek instance: Alarm bileşeni her zaman mount durumda */}
-      <Alarms visible={showAlarmUI} />
-
-      <div style={{ paddingTop: 64, minHeight: '100vh', background: '#f5f6fa' }}>
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
-          
-        </Routes>
-      </div>
-    </>
-  );
-};
-
-export default App;
+}

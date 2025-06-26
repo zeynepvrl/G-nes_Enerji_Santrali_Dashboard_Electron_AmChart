@@ -1,6 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
-const mqtt = require('mqtt')
 const { Pool } = require('pg')
 const sql = require('mssql')
 const isDev = process.argv.includes('--dev')
@@ -8,11 +7,11 @@ const { autoUpdater } = require('electron-updater')
 const { dialog } = require('electron');
 const log = require('electron-log');
 const cron = require('node-cron');
+const workerManager = require('./workers/worker-manager');
 
 let mainWindow;
 let dbPool;
 let mqttClient;
-let currentSubscribedTopic = null;
 
 // Güncelleme loglarını yazdırmak için
 autoUpdater.logger = log;
@@ -21,7 +20,7 @@ autoUpdater.logger.transports.file.level = 'info';
 autoUpdater.channel = 'latest';
 
 //const MAX_DB_RETRIES = 5; // Maksimum deneme sayısı
-const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)
+const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)f
 
 // MSSQL bağlantı konfigürasyonu
 const mssqlConfig = {
@@ -39,6 +38,7 @@ function createWindow () {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -210,147 +210,34 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
-// Tablo isimlerini veya son kayıtları getiren IPC handler
-ipcMain.handle('get-tables', async (event, dbName, tableName, limit, startTime, endTime) => {
-  // Veritabanı bağlantı bilgilerini config'den al
-  const dbConfig = {
-    user: process.env.DB_USER || 'zeynep',
-    host: process.env.DB_HOST || '10.10.30.31',
-    database: dbName,
-    password: process.env.DB_PASSWORD || 'zeynep421',
-    port: parseInt(process.env.DB_PORT || '5432'),
-  };
-
-  let tempPool;
+// Tablo isimlerini veya son kayıtları getiren IPC handler - Worker kullanarak
+ipcMain.handle('get-tables-history', async (event, dbName, tableName, limit, startTime, endTime) => {
+  console.log("get-tables-history",dbName, tableName, limit, startTime, endTime);
   try {
-    // Table name validation
-    if (!tableName || !/^[a-zA-Z0-9_]+$/.test(tableName)) {
-      throw new Error('Invalid table name');
-    }
-
-    tempPool = new Pool(dbConfig);
-
-    // Build query safely
-    let query = `
-      SELECT *
-      FROM "${tableName}"
-    `;
-    const params = [];
-    let whereClauses = [];
-
-    // Add time range conditions
-    if (startTime && endTime) {
-      whereClauses.push(`timestamp BETWEEN $1 AND $2`);
-      params.push(startTime, endTime);
-    } else if (startTime) {
-      whereClauses.push(`timestamp >= $1`);
-      params.push(startTime);
-    } else if (endTime) {
-      whereClauses.push(`timestamp <= $1`);
-      params.push(endTime);
-    }
-
-    if (whereClauses.length > 0) {
-      query += ' WHERE ' + whereClauses.join(' AND ');
-    }
-
-    // Add ordering and limit
-    if (!startTime && !endTime) {
-      query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1}`;
-      params.push(limit || 1000);
-    } else {
-      query += ` ORDER BY timestamp ASC`;
-      if (limit) {
-        query += ` LIMIT $${params.length + 1}`;
-        params.push(limit);
-      }
-    }
-
-    //console.log('Executing query:', query);
-    //console.log('With params:', params);
-
-    const result = await tempPool.query(query, params);
-    
-    // Veri doğrulama ve dönüştürme
-    const validatedRows = result.rows.map(row => {
-      // timestamp kontrolü
-      if (!row.timestamp) {
-        console.warn('Row missing timestamp:', row);
-        return null;
-      }
-      
-      // timestamp'i Date objesine çevir
-      const timestamp = new Date(row.timestamp);
-      if (isNaN(timestamp.getTime())) {
-        console.warn('Invalid timestamp:', row.timestamp);
-        return null;
-      }
-      
-      return {
-        ...row,
-        timestamp: timestamp
-      };
-    }).filter(row => row !== null);
-
-    return validatedRows;
-
+    const result = await workerManager.sendMessage('database', {
+      type: 'get-tables',
+      data: { dbName, tableName, limit, startTime, endTime }
+    });
+    //console.log('✅ get-tables result length:', result?.length || 0);
+    return result;
   } catch (error) {
-    console.error('Database query error:', error);
+    console.error('❌ Database query error:', error);
     throw new Error(`Database query failed: ${error.message}`);
-  } finally {
-    if (tempPool) {
-      try {
-        await tempPool.end();
-      } catch (error) {
-        console.error('Error closing database connection:', error);
-      }
-    }
   }
 });
 
-// Tüm veritabanları için handler
-ipcMain.handle('get-all-tables', async () => {
-  const pool = new Pool({
-    user: process.env.DB_USER || 'zeynep',
-    host: process.env.DB_HOST || '10.10.30.31',
-    database: 'postgres',
-    password: process.env.DB_PASSWORD || 'zeynep421',
-    port: parseInt(process.env.DB_PORT || '5432'),
-  });
-
+// Tüm veritabanları için handler - Worker kullanarak
+ipcMain.handle('get_all_GESdbs_and_their_tables_for_dropdowns', async () => {
+  //console.log('🔍 get_all_GESdbs_and_their_tables_for_dropdowns called');
   try {
-    const dbs = await pool.query("SELECT datname FROM pg_database WHERE datistemplate = false;");
-    const result = {};
-    
-    for (const row of dbs.rows) {
-      const dbName = row.datname;
-      const tempPool = new Pool({
-        user: process.env.DB_USER || 'zeynep',
-        host: process.env.DB_HOST || '10.10.30.31',
-        database: dbName,
-        password: process.env.DB_PASSWORD || 'zeynep421',
-        port: parseInt(process.env.DB_PORT || '5432'),
-      });
-      
-      try {
-        const tables = await tempPool.query(
-          "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-        );
-        result[dbName] = tables.rows.map(r => r.table_name);
-      } catch (e) {
-        console.error(`Database connection error for ${dbName}:`, e);
-        result[dbName] = [];
-      } finally {
-        await tempPool.end();
-      }
-    }
-    
+    const result = await workerManager.sendMessage('database', {
+      type: 'get-all-GESdbs-and-their-tables-for-dropdowns'
+    });
+    //console.log('✅ get_all_GESdbs result keys:', Object.keys(result || {}));
     return result;
   } catch (error) {
-    console.error('Error fetching database list:', error);
+    console.error('❌ Error fetching database list:', error);
     throw new Error(`Failed to fetch database list: ${error.message}`);
-  } finally {
-    await pool.end();
   }
 });
 
@@ -404,50 +291,88 @@ async function initSqlConnection() {
 
 app.whenReady().then(async () => {
   await initSqlConnection();
-  // diğer başlangıç fonksiyonları
-});
+  createWindow()
+  setupMqtt()
+  setupDatabase()
+  setupFacilityDatabase(); 
+  autoUpdater.checkForUpdatesAndNotify();           //Kullanıcı uygulamayı açtığında güncelleme var mı diye kontrol eder ve varsa indirip yükler.
 
-ipcMain.handle('get-mssql-tables', async () => {
-  if (!globalPool) {
-    console.error("⚠ MSSQL bağlantısı yok");
-    return [];
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    }
+  })
+})
+
+// Uygulama kapatılırken worker'ları da kapat
+app.on('window-all-closed', async () => {
+  if (dbPool) {
+    dbPool.end();
   }
+  
+  // Worker'ları kapat
+  await workerManager.terminateAll();
+  
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+}) 
 
+/* package.json içinde version numarasını artır,
+
+Tekrar npm run build,
+
+Yeni release oluştur ve dosyaları yükle. */
+
+// MSSQL tabloları için handler - Worker kullanarak
+ipcMain.handle('get-mssql-tables', async () => {
+  //console.log('🔍 get-mssql-tables called');
   try {
-    const result = await globalPool
-      .request()
-      .query(`
-        SELECT
-          vars.NAME,
-          latest.WERT,
-          CONVERT(VARCHAR(19), latest.DATUMZEIT, 120) AS DATUMZEIT
-        FROM
-          (SELECT DISTINCT NAME FROM dbo.ENERGY) AS vars
-          OUTER APPLY (
-            SELECT TOP 1 WERT, DATUMZEIT
-            FROM dbo.ENERGY
-            WHERE NAME = vars.NAME
-            ORDER BY DATUMZEIT DESC
-          ) AS latest
-      `);
-      
-   
-    const measurements = result.recordset.map(row => ({
-      name: row.NAME,
-      WERT: Math.abs(Number(row.WERT)),
-      DATUMZEIT:row.DATUMZEIT,
-    }));
-    console.log("measurements", measurements.length);
-    return measurements;
-
+    const result = await workerManager.sendMessage('database', {
+      type: 'get-mssql-tables'
+    });
+    console.log("-----------------------------------",result)
+    return result;
   } catch (error) {
     console.error("❌ MSSQL sorgu hatası:", error.message);
     return [];
   }
 });
 
+// MQTT veri işleme için yeni handler
+ipcMain.handle('process-mqtt-data', async (event, rawData, variableConfig) => {
+  //console.log('🔍 process-mqtt-data called with:', { rawData: rawData.substring(0, 100) + '...', variableConfig });
+  try {
+    const result = await workerManager.sendMessage('mqtt', {
+      type: 'process-mqtt-data',
+      data: { rawData, variableConfig }
+    });
+    //console.log('✅ process-mqtt-data result:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ MQTT processing error:', error);
+    return null;
+  }
+});
+
+// Chart veri işleme için yeni handler
+ipcMain.handle('get-chart-data', async (event, data) => {
+  //console.log('🔍 get-chart-data called with:', { dataLength: data?.data?.length, timeUnit: data?.timeUnit, chartType: data?.chartType });
+  try {
+    const result = await workerManager.sendMessage('mqtt', {
+      type: 'get-chart-data',
+      data
+    });
+    //console.log('✅ get-chart-data result length:', result?.length || 0);
+    return result;
+  } catch (error) {
+    console.error('❌ Chart data processing error:', error);
+    return [];
+  }
+});
+
 autoUpdater.on('update-available', (info) => {
-  console.log('Yeni güncelleme mevcut:', info.version);
+  //console.log('Yeni güncelleme mevcut:', info.version);
   dialog.showMessageBox({
     type: 'info',
     title: 'Güncelleme Kontrolü',
@@ -460,7 +385,7 @@ autoUpdater.on('error', (err) => {
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
-  console.log(`İndirilen: ${progressObj.percent.toFixed(2)}%`);
+  //console.log(`İndirilen: ${progressObj.percent.toFixed(2)}%`);
 });
 
 autoUpdater.on('update-downloaded', (info) => {
@@ -475,33 +400,3 @@ autoUpdater.on('update-downloaded', (info) => {
     autoUpdater.quitAndInstall(); // Uygulama kapanır ve yeni sürümle yeniden açılır
   }
 });
-
-app.whenReady().then(() => {
-  createWindow()
-  setupMqtt()
-  setupDatabase()
-  setupFacilityDatabase(); 
-  autoUpdater.checkForUpdatesAndNotify();           //Kullanıcı uygulamayı açtığında güncelleme var mı diye kontrol eder ve varsa indirip yükler.
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
-  })
-})
-
-// Uygulama kapatılırken veritabanı bağlantısını kapat
-app.on('window-all-closed', () => {
-  if (dbPool) {
-    dbPool.end();
-  }
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-}) 
-
-/* package.json içinde version numarasını artır,
-
-Tekrar npm run build,
-
-Yeni release oluştur ve dosyaları yükle. */

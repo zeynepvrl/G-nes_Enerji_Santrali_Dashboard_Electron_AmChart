@@ -1,11 +1,21 @@
 .alarms-container {
-  padding: 0.5rem;
-  padding-top: 3rem;
   width: 100%;
+  height: 100vh;
   max-width: unset;
-  margin: 0 auto 0 auto;
+  margin: 0px;
+  padding: 0.1%;
+  overflow-y: auto;
   background-color: #f8f9fa;
-  min-height: 100vh;
+
+  /* Firefox için kaydırma çubuğunu gizle */
+  scrollbar-width: none;
+  /* IE ve Edge için kaydırma çubuğunu gizle */
+  -ms-overflow-style: none;
+}
+
+/* Webkit tabanlı tarayıcılar (Chrome, Safari, yeni Edge) için kaydırma çubuğunu gizle */
+.alarms-container::-webkit-scrollbar {
+  display: none;
 }
 
 .alarms-container h1 {
@@ -465,6 +475,24 @@ input[type="number"] {
     filter: grayscale(50%);
     background-color: #f8f9fa;
     border: 1px solid #e9ecef;
+}
+
+.manual-alarm-indicator {
+  color: #e74c3c;
+  font-weight: bold;
+  animation: manual-alarm-blink 1.5s infinite;
+  display: inline-block;
+}
+
+@keyframes manual-alarm-blink {
+  0%, 50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  25%, 75% {
+    opacity: 0.3;
+    transform: scale(0.9);
+  }
 }
 
 

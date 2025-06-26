@@ -1,29 +1,36 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
-import { FaChartBar, FaFileAlt, FaCog, FaBell } from 'react-icons/fa';
 import './Navbar.css';
 
-const Navbar: React.FC = () => {
+interface NavbarProps {
+  onNavClick: (componentName: string) => void;
+  activeComponent: string;
+}
+
+const Navbar: React.FC<NavbarProps> = ({ onNavClick, activeComponent }) => {
+  const navItems = [
+    { id: 'Overview', label: '📊 Genel Bakış', icon: '📊' },
+    { id: 'Alarms', label: '🔔 Alarmlar', icon: '🔔' },
+    { id: 'Reports', label: '📄 Raporlar', icon: '📄' },
+    { id: 'Settings', label: '⚙️ Ayarlar', icon: '⚙️' },
+  ];
+
   return (
     <nav className="navbar">
-      <div className="navbar-logo">Energy Dashboard</div>
+      <div className="navbar-brand">
+        <h1>⚡️ Energy Dashboard</h1>
+      </div>
       <div className="navbar-links">
-        <NavLink to="/" className="navbar-link">
-          <FaChartBar className="navbar-icon" />
-          <span>Genel Bakış</span>
-        </NavLink>
-        <NavLink to="/alarms" className="navbar-link">
-          <FaBell className="navbar-icon" />
-          <span>Alarmlar</span>
-        </NavLink>
-        <NavLink to="/reports" className="navbar-link">
-          <FaFileAlt className="navbar-icon" />
-          <span>Raporlar</span>
-        </NavLink>
-        <NavLink to="/settings" className="navbar-link">
-          <FaCog className="navbar-icon" />
-          <span>Ayarlar</span>
-        </NavLink>
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            className={`nav-button ${activeComponent === item.id ? 'active' : ''}`}
+            onClick={() => onNavClick(item.id)}
+            title={item.label}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-text">{item.label}</span>
+          </button>
+        ))}
       </div>
     </nav>
   );
