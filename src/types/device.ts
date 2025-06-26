@@ -30,10 +30,5 @@ export interface DeviceConfig {
 /**
  * Dropdown data structure for device selection
  */
-export type DropdownData = Record<string, Record<string, Record<string, VariableConfig[]>>>;
-
-/**
- * The raw mapping of GES database names to a list of their table names, as returned from the main process.
- * e.g., { "eskisehir_cayli": ["analizor1", "inverter_a"], ... }
- */
+export type DropdownData = Record<string, Record<string, Record<string, VariableConfig[]>>>; 
 export type GesDatabaseMapping = Record<string, string[]>; 

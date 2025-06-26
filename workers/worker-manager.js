@@ -55,12 +55,12 @@ class WorkerManager {
   // Worker'a mesaj gönder ve Promise döndür
   sendMessage(workerType, message) {
     //console.log(`📤 Sending message to worker ${workerType}:`, { type: message.type, dataKeys: Object.keys(message.data || {}) });
-    return new Promise((resolve, reject) => {                 //cevabu bekleyeceğinin promise ı
+    return new Promise((resolve, reject) => {
       const worker = this.getWorker(workerType);
       const messageId = ++this.messageId;
 
       // Bekleyen mesajı kaydet
-      this.pendingMessages.set(messageId, { resolve, reject });    //bekleme listesine alma
+      this.pendingMessages.set(messageId, { resolve, reject });
 
       // Timeout ayarla (30 saniye)
       setTimeout(() => {
@@ -69,10 +69,10 @@ class WorkerManager {
           console.error(`⏰ Worker ${workerType} message timeout for messageId: ${messageId}`);
           reject(new Error('Worker message timeout'));
         }
-      }, 60000);
+      }, 30000);
 
       // Mesajı gönder
-      worker.postMessage({        //mesajın gerçekten gönderimi
+      worker.postMessage({
         id: messageId,
         ...message
       });
@@ -89,7 +89,7 @@ class WorkerManager {
       this.pendingMessages.delete(id);
 
       if (type === 'success') {
-        //console.log(`✅ Worker message ${id} resolved successfully`);
+        console.log(`✅ Worker message ${id} resolved successfully`);
         resolve(data);
       } else {
         //console.error(`❌ Worker message ${id} failed:`, error);
