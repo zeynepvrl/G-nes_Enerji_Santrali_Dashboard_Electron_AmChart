@@ -66,12 +66,18 @@ const Overview: React.FC = () => {
   const [selectedGes, setSelectedGes] = useState('');
   const [selectedArac, setSelectedArac] = useState('');
   const [selectedVariable, setSelectedVariable] = useState('');
+  const selectedIlRef = useRef('');
+  const selectedGesRef = useRef('');
+  const selectedAracRef = useRef('');
+  const selectedVariableRef = useRef('');
+
+  
   const [dropdownData, setDropdownData] = useState<DropdownData>({});
   const timeIntervalRef = useRef<TimeInterval>({ timeUnit: "minute", count: 1 });
   // Veri buffer'ları için state'ler
   const [dataBuffer, setDataBuffer] = useState<ChartDataPoint[]>([]);
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
-  const [isLoadingHistoricalData, setIsLoadingHistoricalData] = useState(false);
+  const isLoadingHistoricalDataRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
   const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
@@ -118,6 +124,7 @@ const Overview: React.FC = () => {
   }
  
   useEffect(() => {
+    console.log("1. efeect çalıştı dropdown setterlar")
     if (!window.electronAPI?.getAllGESdbsAndTheirTablesForDropdowns) return;
     window.electronAPI.getAllGESdbsAndTheirTablesForDropdowns().then((allGesdbs: any) => {
       const data: Record<string, Record<string, Record<string, VariableConfig[]>>> = {};
@@ -161,15 +168,228 @@ const Overview: React.FC = () => {
       });
 
       setDropdownData(data);
-      setSelectedIl('eskisehir');
-      setSelectedGes('akkul');
-      setSelectedArac('analizor1');
-      setSelectedVariable('p');
+      
       
     });
   }, []);
+  
+    // Ana effect -  grafik yalnızca ilk render oluşturuluyor müklü
+  useEffect(() => {
+      console.log("3. efeect çalıştı chart oluşturma")
+      const root = am5.Root.new("chartdiv");
+      rootRef.current = root;  
+      root.setThemes([
+        am5themes_Animated.new(root)
+      ]);
+      const stockChart = root.container.children.push(
+        am5stock.StockChart.new(root, {
+          paddingRight: 0,
+        })
+      );
+      root.numberFormatter.set("numberFormat", "#,###.00");
+      const mainPanel = stockChart.panels.push(
+        am5stock.StockPanel.new(root, {
+          wheelY: "zoomX",
+          panX: true,
+          panY: true,
+        })
+      );
+      const dateAxis = mainPanel.xAxes.push(
+        am5xy.GaplessDateAxis.new(root, {
+          baseInterval: {
+            timeUnit: timeIntervalRef.current.timeUnit,
+            count: timeIntervalRef.current.count
+          },
+          renderer: am5xy.AxisRendererX.new(root, {
+            minorGridEnabled: true
+          }),
+          tooltip: am5.Tooltip.new(root, {}),
+          maxZoomCount: 200,
+        })
+      );
+      
+      dateAxisRef.current = dateAxis;
+      const valueAxis = mainPanel.yAxes.push(
+        am5xy.ValueAxis.new(root, {
+          renderer: am5xy.AxisRendererY.new(root, {
+            pan: "zoom"
+          }),
+          extraMin:0.1,
+          tooltip: am5.Tooltip.new(root, {}),
+          numberFormat: "#,###.00",
+          extraTooltipPrecision: 2
+        })
+      );
+    
+      valueAxisRef.current = valueAxis;
+  
+      const valueSeries = mainPanel.series.push(
+        am5xy.CandlestickSeries.new(root, {
+          name: selectedArac || "Seçili Cihaz",
+          clustered: false,
+          valueXField: "timestamp",
+          valueYField: "close",
+          highValueYField: "high",
+          lowValueYField: "low",
+          openValueYField: "open",
+          calculateAggregates: true,
+          xAxis: dateAxis,
+          yAxis: valueAxis,
+          legendValueText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/] [fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/] [fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/] [fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]",
+          tooltip: am5.Tooltip.new(root, {
+            pointerOrientation: "horizontal",
+            labelText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/]\n[fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/]\n[fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/]\n[fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]"
+          })
+        })
+      );
+      stockChart.set("stockSeries", valueSeries);
+      const valueLegend = mainPanel.plotContainer.children.push(
+        am5stock.StockLegend.new(root, {
+          stockChart: stockChart,
+          layout: root.horizontalLayout,
+          x: am5.p50,
+          centerX: am5.p50,
+          y: 0,
+          centerY: am5.p0,
+          background: am5.Rectangle.new(root, {
+            fill: am5.color("#ffffff"),
+            fillOpacity: 0.8
+          })
+        })
+      );
+      valueLegend.labels.template.setAll({
+        fill: am5.color("#666666"),
+        fontSize: "12px"
+      });
+  
+      valueLegend.markers.template.setAll({
+        width: 20,
+        height: 20
+      });
+  
+      // Create volume axis
+      const volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
+      volumeAxisRenderer.labels.template.set("forceHidden", true);
+      volumeAxisRenderer.grid.template.set("forceHidden", true);
+  
+      const volumeValueAxis = mainPanel.yAxes.push(
+        am5xy.ValueAxis.new(root, {
+          numberFormat: "#.#a",
+          height: am5.percent(20),
+          y: am5.percent(100),
+          centerY: am5.percent(100),
+          renderer: volumeAxisRenderer
+        })
+      );
+      // Add volume series
+      const volumeSeries = mainPanel.series.push(
+        am5xy.ColumnSeries.new(root, {
+          name: "Hacim",
+          clustered: false,
+          valueXField: "timestamp",
+          valueYField: "volume",
+          xAxis: dateAxis,
+          yAxis: volumeValueAxis,
+          legendValueText: "[fontSize: 12px #a259ff bold]{valueY.formatNumber('#,###.0a')}[/]",
+          fill: am5.color("#a259ff"),
+          stroke: am5.color("#6a11cb")
+        })
+      );
+      volumeSeries.columns.template.setAll({
+        strokeOpacity: 0,
+        fillOpacity: 0.5
+      });
+      // Color columns by stock rules
+      volumeSeries.columns.template.adapters.add("fill", function(fill, target) {
+        const dataItem = target.dataItem;
+        if (dataItem) {
+          const close = dataItem.get("close" as any);
+          const open = dataItem.get("open" as any);
+          if (typeof close === 'number' && typeof open === 'number') {
+            return close >= open ? am5.color("#43e0ff") : am5.color("#6a11cb");
+          }
+        }
+        return fill;
+      });
+  
+      // Set main series
+      stockChart.set("volumeSeries", volumeSeries);
+      valueLegend.data.setAll([valueSeries, volumeSeries]);
+   
+      // Add cursor
+      mainPanel.set("cursor", am5xy.XYCursor.new(root, {
+        yAxis: valueAxis,
+        xAxis: dateAxis,
+        snapToSeries: [valueSeries],
+        snapToSeriesBy: "y!",
+  
+      }));
+      
+      var intervalSwitcher = am5stock.IntervalControl.new(root, {
+        stockChart: stockChart,
+        items: [
+          { id: "1min", label: "1 Dakika", interval: { timeUnit: "minute", count: 1 } },
+          { id: "15min", label: "15 Dakika", interval: { timeUnit: "minute", count: 15 } },
+          { id: "1hour", label: "1 Saat", interval: { timeUnit: "hour", count: 1 } },
+          { id: "3hour", label: "3 Saat", interval: { timeUnit: "hour", count: 3 } }
+        ]
+      });   
+      // Interval değişikliğini dinle
+      intervalSwitcher.events.on("selected", function(ev) {
+        if (!ev.item || typeof ev.item === 'string') return;
+        
+        const item = ev.item as unknown as { interval: { timeUnit: "minute" | "hour"; count: number } };
+        
+        
+        timeIntervalRef.current = {
+          timeUnit: item.interval.timeUnit,
+          count: item.interval.count
+        };
+      
+      });
+  
+      // Add toolbar
+      const container = document.getElementById("chartcontrols");
+      if (container) {
+        am5stock.StockToolbar.new(root, {
+          container: container,
+          stockChart: stockChart,
+          controls: [
+            am5stock.DateRangeSelector.new(root, {
+              stockChart: stockChart
+            }),
+            am5stock.SeriesTypeControl.new(root, {
+              stockChart: stockChart
+            }),
+            am5stock.DrawingControl.new(root, {
+              stockChart: stockChart
+            }),
+            am5stock.ResetControl.new(root, {
+              stockChart: stockChart
+            }),
+            am5stock.SettingsControl.new(root, {
+              stockChart: stockChart
+            }),
+            intervalSwitcher
+          ]
+        });
+      }
+      // Save references
+      chartRef.current = stockChart;
+      // Initialize with empty data
+      valueSeries.data.setAll([]);
+      // Cleanup
+      return () => {
+        
+        if (rootRef.current) {
+          rootRef.current.dispose();
+        }
+      };
+  }, []);
+  
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
+    console.log("2. efeect çalıştı geçmiş veri mqtt zoom")
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
     const dbName = `${selectedIl}_${selectedGes}`;
     const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
@@ -179,7 +399,6 @@ const Overview: React.FC = () => {
     }
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10*60*60*1000);
-    
     const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
     const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
 
@@ -242,31 +461,52 @@ const Overview: React.FC = () => {
                     const volumeSeries = chart.get('volumeSeries');
                     if (valueSeries && volumeSeries) {          
                       //console.log('📊 Updating chart with data...');
-                      valueSeries.data.setAll(chartData);  
+                      valueSeries.data.setAll(chartData);
+                      console.log("valueseries eklendi")
                       volumeSeries.data.setAll(chartData);
                       console.log(chartData.length)
-                      console.log(hasZoomedInitially)
+                     
                       // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
                       if (!hasZoomedInitially && chartData.length > 199) {
-                        valueSeries.events.once("datavalidated", function() {
+                        valueSeries.events.once("datavalidated", function () {
                           if (dateAxisRef.current) {
-                            const startIndex = Math.max(0, chartData.length - 200);
+                            const axis = dateAxisRef.current;
+                            const startIndex = Math.max(0, chartData.length - 180);
                             const start = chartData[startIndex]?.timestamp;
                             const end = chartData[chartData.length - 1]?.timestamp;
+                        
                             if (start && end) {
-                              console.log('🔍 Setting initial zoom...');
-                              dateAxisRef.current.zoomToDates(new Date(start), new Date(end));
-                              setHasZoomedInitially(true);
+                              // Önce eski aralığı al
+                              const beforeMin = axis.getPrivate("selectionMin");
+                              const beforeMax = axis.getPrivate("selectionMax");
+                        
+                              axis.zoomToDates(new Date(start), new Date(end));
+                              console.log("🔍 Initial zoom başlatıldı...");
+                        
+                              setTimeout(() => {
+                                const afterMin = axis.getPrivate("selectionMin");
+                                const afterMax = axis.getPrivate("selectionMax");
+                        
+                                if (afterMin !== beforeMin || afterMax !== beforeMax) {
+                                  console.log("✅ Zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
+                                  setHasZoomedInitially(true);
+                                } else {
+                                  console.log("⚠️ Zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
+                                }
+                              }, 2000); // 100-300ms arası yeterli
                             }
                           }
                         });
-                      } 
+                        
+                      }
+                      
                     } 
                   }
+                  
                 } catch (err) {
                   console.error('❌ Chart update error (possibly disposed):', err);
                 }
-                return () => { isMounted = false; };
+                return () => { isMounted = false;};
               }
             } catch (error) {
               console.error('❌ Worker chart data processing error:', error);
@@ -345,7 +585,7 @@ const Overview: React.FC = () => {
           handleMqttData(data);
         }
       });
-
+      
       return () => {
         console.log('📡 Unsubscribing from MQTT topic:', topic);
         if (typeof unsubscribe === 'function') {
@@ -357,233 +597,29 @@ const Overview: React.FC = () => {
     }
   }, [selectedVariable]);
 
-  // Ana effect - selectedVariable değişikliğini dinler
+
   useEffect(() => {
-    if (!selectedVariable) return;
-    const root = am5.Root.new("chartdiv");
-    rootRef.current = root;  
-    root.setThemes([
-      am5themes_Animated.new(root)
-    ]);
-    const stockChart = root.container.children.push(
-      am5stock.StockChart.new(root, {
-        paddingRight: 0,
-      })
-    );
-    root.numberFormatter.set("numberFormat", "#,###.00");
-    const mainPanel = stockChart.panels.push(
-      am5stock.StockPanel.new(root, {
-        wheelY: "zoomX",
-        panX: true,
-        panY: true,
-      })
-    );
-    const dateAxis = mainPanel.xAxes.push(
-      am5xy.GaplessDateAxis.new(root, {
-        baseInterval: {
-          timeUnit: timeIntervalRef.current.timeUnit,
-          count: timeIntervalRef.current.count
-        },
-        renderer: am5xy.AxisRendererX.new(root, {
-          minorGridEnabled: true
-        }),
-        tooltip: am5.Tooltip.new(root, {}),
-        maxZoomCount: 200,
-      })
-    );
-    
-    dateAxisRef.current = dateAxis;
-    const valueAxis = mainPanel.yAxes.push(
-      am5xy.ValueAxis.new(root, {
-        renderer: am5xy.AxisRendererY.new(root, {
-          pan: "zoom"
-        }),
-        extraMin:0.1,
-        tooltip: am5.Tooltip.new(root, {}),
-        numberFormat: "#,###.00",
-        extraTooltipPrecision: 2
-      })
-    );
-  
-    valueAxisRef.current = valueAxis;
-
-    const valueSeries = mainPanel.series.push(
-      am5xy.CandlestickSeries.new(root, {
-        name: selectedArac || "Seçili Cihaz",
-        clustered: false,
-        valueXField: "timestamp",
-        valueYField: "close",
-        highValueYField: "high",
-        lowValueYField: "low",
-        openValueYField: "open",
-        calculateAggregates: true,
-        xAxis: dateAxis,
-        yAxis: valueAxis,
-        legendValueText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/] [fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/] [fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/] [fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]",
-        tooltip: am5.Tooltip.new(root, {
-          pointerOrientation: "horizontal",
-          labelText: "[fontSize: 12px #666666]Açılış: [/][fontSize: 12px #0d6efd bold]{openValueY}[/]\n[fontSize: 12px #666666]Yüksek: [/][fontSize: 12px #198754 bold]{highValueY}[/]\n[fontSize: 12px #666666]Düşük: [/][fontSize: 12px #dc3545 bold]{lowValueY}[/]\n[fontSize: 12px #666666]Kapanış: [/][fontSize: 12px #0d6efd bold]{valueY}[/]"
-        })
-      })
-    );
-    stockChart.set("stockSeries", valueSeries);
-    const valueLegend = mainPanel.plotContainer.children.push(
-      am5stock.StockLegend.new(root, {
-        stockChart: stockChart,
-        layout: root.horizontalLayout,
-        x: am5.p50,
-        centerX: am5.p50,
-        y: 0,
-        centerY: am5.p0,
-        background: am5.Rectangle.new(root, {
-          fill: am5.color("#ffffff"),
-          fillOpacity: 0.8
-        })
-      })
-    );
-    valueLegend.labels.template.setAll({
-      fill: am5.color("#666666"),
-      fontSize: "12px"
-    });
-
-    valueLegend.markers.template.setAll({
-      width: 20,
-      height: 20
-    });
-
-    // Create volume axis
-    const volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
-    volumeAxisRenderer.labels.template.set("forceHidden", true);
-    volumeAxisRenderer.grid.template.set("forceHidden", true);
-
-    const volumeValueAxis = mainPanel.yAxes.push(
-      am5xy.ValueAxis.new(root, {
-        numberFormat: "#.#a",
-        height: am5.percent(20),
-        y: am5.percent(100),
-        centerY: am5.percent(100),
-        renderer: volumeAxisRenderer
-      })
-    );
-    // Add volume series
-    const volumeSeries = mainPanel.series.push(
-      am5xy.ColumnSeries.new(root, {
-        name: "Hacim",
-        clustered: false,
-        valueXField: "timestamp",
-        valueYField: "volume",
-        xAxis: dateAxis,
-        yAxis: volumeValueAxis,
-        legendValueText: "[fontSize: 12px #a259ff bold]{valueY.formatNumber('#,###.0a')}[/]",
-        fill: am5.color("#a259ff"),
-        stroke: am5.color("#6a11cb")
-      })
-    );
-    volumeSeries.columns.template.setAll({
-      strokeOpacity: 0,
-      fillOpacity: 0.5
-    });
-    // Color columns by stock rules
-    volumeSeries.columns.template.adapters.add("fill", function(fill, target) {
-      const dataItem = target.dataItem;
-      if (dataItem) {
-        const close = dataItem.get("close" as any);
-        const open = dataItem.get("open" as any);
-        if (typeof close === 'number' && typeof open === 'number') {
-          return close >= open ? am5.color("#43e0ff") : am5.color("#6a11cb");
-        }
-      }
-      return fill;
-    });
-
-    // Set main series
-    stockChart.set("volumeSeries", volumeSeries);
-    valueLegend.data.setAll([valueSeries, volumeSeries]);
- 
-    // Add cursor
-    mainPanel.set("cursor", am5xy.XYCursor.new(root, {
-      yAxis: valueAxis,
-      xAxis: dateAxis,
-      snapToSeries: [valueSeries],
-      snapToSeriesBy: "y!",
-
-    }));
-    
-    var intervalSwitcher = am5stock.IntervalControl.new(root, {
-      stockChart: stockChart,
-      items: [
-        { id: "1min", label: "1 Dakika", interval: { timeUnit: "minute", count: 1 } },
-        { id: "15min", label: "15 Dakika", interval: { timeUnit: "minute", count: 15 } },
-        { id: "1hour", label: "1 Saat", interval: { timeUnit: "hour", count: 1 } },
-        { id: "3hour", label: "3 Saat", interval: { timeUnit: "hour", count: 3 } }
-      ]
-    });   
-    // Interval değişikliğini dinle
-    intervalSwitcher.events.on("selected", function(ev) {
-      if (!ev.item || typeof ev.item === 'string') return;
-      
-      const item = ev.item as unknown as { interval: { timeUnit: "minute" | "hour"; count: number } };
-      
-      
-      timeIntervalRef.current = {
-        timeUnit: item.interval.timeUnit,
-        count: item.interval.count
-      };
-    
-    });
-
-    // Add toolbar
-    const container = document.getElementById("chartcontrols");
-    if (container) {
-      am5stock.StockToolbar.new(root, {
-        container: container,
-        stockChart: stockChart,
-        controls: [
-          am5stock.DateRangeSelector.new(root, {
-            stockChart: stockChart
-          }),
-          am5stock.SeriesTypeControl.new(root, {
-            stockChart: stockChart
-          }),
-          am5stock.DrawingControl.new(root, {
-            stockChart: stockChart
-          }),
-          am5stock.ResetControl.new(root, {
-            stockChart: stockChart
-          }),
-          am5stock.SettingsControl.new(root, {
-            stockChart: stockChart
-          }),
-          intervalSwitcher
-        ]
-      });
-    }
-    // Save references
-    chartRef.current = stockChart;
-    // Initialize with empty data
-    valueSeries.data.setAll([]);
-    // Cleanup
-    return () => {
-      
-      if (rootRef.current) {
-        rootRef.current.dispose();
-      }
-    };
-  }, [selectedVariable]);
+    selectedIlRef.current = selectedIl;
+    selectedGesRef.current = selectedGes;
+    selectedAracRef.current = selectedArac;
+    selectedVariableRef.current = selectedVariable;
+  }, [selectedIl, selectedGes, selectedArac, selectedVariable]);
 
   // Geçmiş veri yükleme fonksiyonu
-  const loadHistoricalData = useCallback(async (startTime: Date, endTime: Date) => {
+  const loadHistoricalData = async (startTime: Date, endTime: Date) => {
+    if (!selectedIlRef.current || !selectedGesRef.current || !selectedAracRef.current || !selectedVariableRef.current || isLoadingHistoricalDataRef.current){ 
+      console.log("sorun burda mi 590")
+      return;
+    }
+    isLoadingHistoricalDataRef.current = true;
+    const dbName = `${selectedIlRef.current}_${selectedGesRef.current}`;
     console.log("çekiliyoor");
-    if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable || isLoadingHistoricalData) return;
-    setIsLoadingHistoricalData(true);
-    const dbName = `${selectedIl}_${selectedGes}`;
-  
     try {
       // Türkiye saati için özel format
       const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
       const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
-      
-      const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTimeStr, endTimeStr);
+      console.log(dbName, selectedAracRef.current, undefined, startTimeStr, endTimeStr)
+      const records = await window.electronAPI.getTablesHistory(dbName, selectedAracRef.current, undefined, startTimeStr, endTimeStr);
   
       if (records && records.length > 0) {
         const newData: ChartDataPoint[] = records
@@ -618,9 +654,66 @@ const Overview: React.FC = () => {
     } catch (error) {
       console.error('Geçmiş veriler yüklenirken hata:', error);
     } finally {
-      setIsLoadingHistoricalData(false);
+      isLoadingHistoricalDataRef.current = false;
     }
-  }, [selectedVariable]);
+  };
+  // DateAxis için event listener
+  useEffect(() => {
+    console.log("4. efeect çalıştı dateaxis esueffect")
+    console.log("hasZoomedInitially - dateaxis esueffect",hasZoomedInitially)
+    if (!dateAxisRef.current) {
+      console.log("dateAxisRef.current yok")
+      return;
+    }
+    
+    const handleStart = (start: number | undefined) => {
+      if (start === undefined || isLoadingHistoricalDataRef.current || !hasZoomedInitially ){
+        return;
+      }
+      // Son yüklemeden bu yana 10 saniye geçmediyse çık
+      const now = Date.now();
+      if (now - lastLoadTimeRef.current < 1000) {
+        console.log("1 saniye geçmedi")
+        return;
+      }
+      
+      const chart = chartRef.current;
+      if (!chart) return;
+      
+      const valueSeries = chart.get('stockSeries');
+      if (!valueSeries) return;
+
+      const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
+      if (!currentMin) return;
+
+      const seriesData = valueSeries.data.values as { timestamp: number }[];
+      if (!seriesData || seriesData.length === 0) return;
+
+      const oldestDataPoint = seriesData[0] as { timestamp: number };
+      const oldestTimestamp = oldestDataPoint.timestamp;
+      
+      const { timeUnit, count } = timeIntervalRef.current;
+      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+      const intervalMs = ms * 200; // 200 mum için gerekli süre
+      
+      if (currentMin - oldestTimestamp < intervalMs) {
+        const from = new Date(oldestTimestamp - intervalMs);
+        const to = new Date(oldestTimestamp);
+        lastLoadTimeRef.current = now;
+        loadHistoricalData(from, to);
+        console.log("load Historocal fonk çağırıldı çekildi")
+      }
+    };
+    dateAxisRef.current?.on("start", handleStart);
+    return () => {
+      dateAxisRef.current?.off("start", handleStart);
+    };
+  }, [dateAxisRef.current,hasZoomedInitially]);
+
+  useEffect(() => {
+    console.log("hasZoomedInitially değişti ",hasZoomedInitially)
+    console.log("isLoadingHistoricalDataRef.current değişti ",isLoadingHistoricalDataRef.current)
+  }, [hasZoomedInitially,isLoadingHistoricalDataRef.current])
 
   const addComparisonLine = async (key: string, variableName: string) => {
     console.log(`📊 Adding comparison line:`, { key, variableName });
@@ -751,7 +844,6 @@ const Overview: React.FC = () => {
       comparisonUnsubscribeRefs.current.push(unsubscribe);
     }
   };
-  
   // Karşılaştırma serilerini yönetmek için useEffect
   useEffect(() => {
     // Önceki ve mevcut seçimleri karşılaştır
@@ -802,53 +894,7 @@ const Overview: React.FC = () => {
     };
   }, [comparisonSelections]);
 
-  // DateAxis için event listener
-  useEffect(() => {
-    console.log("hasZoomedInitially - dateaxis esueffect",hasZoomedInitially)
-    if (!dateAxisRef.current && !hasZoomedInitially) {
-      return;
-    }
-    const handleStart = (start: number | undefined) => {
-      if (start === undefined || isLoadingHistoricalData) return;
-      
-      // Son yüklemeden bu yana 10 saniye geçmediyse çık
-      const now = Date.now();
-      if (now - lastLoadTimeRef.current < 1000) {
-        return;
-      }
-      
-      const chart = chartRef.current;
-      if (!chart) return;
-      
-      const valueSeries = chart.get('stockSeries');
-      if (!valueSeries) return;
-
-      const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
-      if (!currentMin) return;
-
-      const seriesData = valueSeries.data.values as { timestamp: number }[];
-      if (!seriesData || seriesData.length === 0) return;
-
-      const oldestDataPoint = seriesData[0] as { timestamp: number };
-      const oldestTimestamp = oldestDataPoint.timestamp;
-      
-      const { timeUnit, count } = timeIntervalRef.current;
-      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-      const intervalMs = ms * 200; // 200 mum için gerekli süre
-      
-      if (currentMin - oldestTimestamp < intervalMs) {
-        const from = new Date(oldestTimestamp - intervalMs);
-        const to = new Date(oldestTimestamp);
-        lastLoadTimeRef.current = now;
-        loadHistoricalData(from, to);
-      }
-    };
-    dateAxisRef.current?.on("start", handleStart);
-    return () => {
-      dateAxisRef.current?.off("start", handleStart);
-    };
-  }, [dateAxisRef.current, loadHistoricalData]);
-
+  
   // timeInterval değişikliğini dinleyen effect
   useEffect(() => {
     const hours = new Set<string>();
