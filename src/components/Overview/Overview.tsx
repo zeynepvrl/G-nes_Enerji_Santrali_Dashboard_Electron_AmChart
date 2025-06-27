@@ -389,214 +389,163 @@ const Overview: React.FC = () => {
   
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
-    console.log("2. efeect çalıştı geçmiş veri mqtt zoom")
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
-    const dbName = `${selectedIl}_${selectedGes}`;
-    const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
-    if (!variableConfig) {
-      console.warn('⚠️ Variable config not found:', { selectedVariable, availableVariables: dropdownData[selectedIl][selectedGes][selectedArac] });
-      return;
-    }
-    const endTime = new Date();
-    const startTime = new Date(endTime.getTime() - 10*60*60*1000);
-    const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
-    const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
-
-    window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTimeStr, endTimeStr)
-      .then(async (records) => {
-        if (records && records.length > 0) {
-          const rawData: ChartDataPoint[] = records
-            .map(record => {
-              const timestamp = new Date(record.timestamp).getTime();
-              if(selectedVariable === "p"){
-                const value = record[selectedVariable];
-                const numValue = Math.abs(Number(value));
-                return {
-                  timestamp: timestamp,
-                  value: numValue
-                };
-              }
-              else{
-                const value = record[selectedVariable];
-                const numValue = Number(value);
-                return {
-                  timestamp: timestamp,
-                  value: numValue
-                };
-              }
-            })
-            .filter((item): item is ChartDataPoint => item !== null);
-
-            setDataBuffer(rawData);
-          
-            if (!rawData || rawData.length === 0) {
-              console.log('⚠️ Raw data is empty');
-              return;
-            }
-        
-            // Worker kullanarak chart verisi oluştur
-            try {
-              //console.log('🔧 Creating chart data with worker...');
-              const chartData = await window.electronAPI.getChartData({
-                data: rawData,
-                timeUnit: timeIntervalRef.current.timeUnit,
-                count: timeIntervalRef.current.count,
-                chartType: 'candlestick'
-              }) as CandleData[];
-              
-              //console.log('📈 Chart data created:', { candleCount: chartData?.length || 0 });
-              
-              if(chartData.length > 0){
-                let isMounted = true;
-                const chart = chartRef.current;
-                try {
-                  if (
-                    chart &&
-                    chartData.length > 0 &&
-                    rootRef.current &&
-                    typeof chart.get === 'function' &&
-                    !(typeof chart.isDisposed === 'function' && chart.isDisposed())
-                  ) {
-                    const valueSeries = chart.get('stockSeries');
-                    const volumeSeries = chart.get('volumeSeries');
-                    if (valueSeries && volumeSeries) {          
-                      //console.log('📊 Updating chart with data...');
-                      valueSeries.data.setAll(chartData);
-                      console.log("valueseries eklendi")
-                      volumeSeries.data.setAll(chartData);
-                      console.log(chartData.length)
-                     
-                      // Sadece ilk veri geldiğinde ve daha önce zoom yapılmadıysa
-                      if (!hasZoomedInitially && chartData.length > 199) {
-                        valueSeries.events.once("datavalidated", function () {
-                          if (dateAxisRef.current) {
-                            const axis = dateAxisRef.current;
-                            const startIndex = Math.max(0, chartData.length - 180);
-                            const start = chartData[startIndex]?.timestamp;
-                            const end = chartData[chartData.length - 1]?.timestamp;
-                        
-                            if (start && end) {
-                              // Önce eski aralığı al
-                              const beforeMin = axis.getPrivate("selectionMin");
-                              const beforeMax = axis.getPrivate("selectionMax");
-                        
-                              axis.zoomToDates(new Date(start), new Date(end));
-                              console.log("🔍 Initial zoom başlatıldı...");
-                        
-                              setTimeout(() => {
-                                const afterMin = axis.getPrivate("selectionMin");
-                                const afterMax = axis.getPrivate("selectionMax");
-                        
-                                if (afterMin !== beforeMin || afterMax !== beforeMax) {
-                                  console.log("✅ Zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
-                                  setHasZoomedInitially(true);
-                                } else {
-                                  console.log("⚠️ Zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
-                                }
-                              }, 2000); // 100-300ms arası yeterli
-                            }
-                          }
-                        });
-                        
-                      }
-                      
-                    } 
-                  }
-                  
-                } catch (err) {
-                  console.error('❌ Chart update error (possibly disposed):', err);
-                }
-                return () => { isMounted = false;};
-              }
-            } catch (error) {
-              console.error('❌ Worker chart data processing error:', error);
-            }
-          }
-        })
-      .catch(error => {
-        console.error('❌ Geçmiş veriler çekilirken hata:', error);
-      })
-    // Handle MQTT data
-    const handleMqttData = async (data: string) => {
+  
+    let unsubscribeMqtt: (() => void) | null = null;
+  
+    const fetchAndInit = async () => {
       try {
-        const result = await window.electronAPI.processMqttData(data, variableConfig);
-        if (!result) {
-          return;
-        }
-        const { timestamp } = result;
-        const value = selectedVariable === "p" ? Math.abs(result.value) : result.value; // p değişkeni için pozitife çevir
-        setDataBuffer(prev => [...prev, { timestamp, value }]);
-        const { timeUnit, count } = timeIntervalRef.current;
-        const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-        const roundedTime = Math.floor(timestamp / ms) * ms;
+        const dbName = `${selectedIl}_${selectedGes}`;
+        const variableConfig = dropdownData[selectedIl][selectedGes][selectedArac].find(v => v.name === selectedVariable);
+        if (!variableConfig) return;
+  
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - 10 * 60 * 60 * 1000);
+        const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+        const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+  
+        const records = await window.electronAPI.getTablesHistory(dbName, selectedArac, undefined, startTimeStr, endTimeStr);
+        if (!records || records.length === 0) return;
+  
+        const rawData: ChartDataPoint[] = records.map((record) => {
+          const timestamp = new Date(record.timestamp).getTime();
+          const value = record[selectedVariable];
+          const numValue = selectedVariable === "p" ? Math.abs(Number(value)) : Number(value);
+          return { timestamp, value: numValue };
+        });
+  
+        setDataBuffer(rawData);
+  
+        const chartData = await window.electronAPI.getChartData({
+          data: rawData,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'candlestick'
+        }) as CandleData[];
+  
         const chart = chartRef.current;
-        if (!chart) {
-          console.warn('⚠️ Chart not available for MQTT update');
-          return;
+        if (chart && chartData.length > 0) {
+          const valueSeries = chart.get("stockSeries");
+          const volumeSeries = chart.get("volumeSeries");
+          valueSeries?.data.setAll(chartData);
+          volumeSeries?.data.setAll(chartData);
+  
+          // ⬇️ Zoom işlemi burada
+          if (!hasZoomedInitially && chartData.length > 199) {
+            valueSeries?.events.once("datavalidated", () => {
+              if (dateAxisRef.current) {
+                const axis = dateAxisRef.current;
+                const startIndex = Math.max(0, chartData.length - 180);
+                const start = chartData[startIndex]?.timestamp;
+                const end = chartData[chartData.length - 1]?.timestamp;
+  
+                if (start && end) {
+                  const beforeMin = axis.getPrivate("selectionMin");
+                  const beforeMax = axis.getPrivate("selectionMax");
+  
+                  axis.zoomToDates(new Date(start), new Date(end));
+                  console.log("🔍 Initial zoom başlatıldı...");
+  
+                  setTimeout(() => {
+                    const afterMin = axis.getPrivate("selectionMin");
+                    const afterMax = axis.getPrivate("selectionMax");
+  
+                    if (afterMin !== beforeMin || afterMax !== beforeMax) {
+                      console.log("✅ Zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
+                      setHasZoomedInitially(true);
+                    } else {
+                      console.log("⚠️ Zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
+                    }
+                  }, 2000);
+                }
+              }
+            });
+          }
         }
-        const valueSeries = chart.get("stockSeries");
-        const volumeSeries = chart.get("volumeSeries");
-        if (!valueSeries) {
-          console.warn('⚠️ Value series not available');
-          return;
+  
+        // 🔔 MQTT abonesi yalnızca geçmiş veri geldikten sonra başlatılır
+        if (selectedIl !== "zenon") {
+          const mqttIl = capitalize(selectedIl);
+          const mqttGes = capitalize(selectedGes);
+          const cihazGrubu = getCihazGrubu(selectedArac);
+          if (cihazGrubu) {
+            const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
+            console.log("📡 MQTT SUBSCRIBE:", topic);
+            window.electronAPI.subscribeMqtt(topic);
+  
+            unsubscribeMqtt = window.electronAPI.onMqttData((data, incomingTopic) => {
+              if (incomingTopic?.toLowerCase() === topic.toLowerCase()) {
+                handleMqttData(data, variableConfig);
+              }
+            });
+          }
         }
-        const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime) as CandleData | undefined;
-        if (currentCandle) {
-          const updatedCandle: CandleData = {
-            ...currentCandle,
-            high: Math.max(currentCandle.high, value),
-            low: Math.min(currentCandle.low, value),
-            close: value,
-            volume: currentCandle.volume + 1
-          };
-          valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
-          volumeSeries?.data.setIndex(volumeSeries.data.indexOf(currentCandle), updatedCandle);
-        } else {
-
-          const newCandle: CandleData = {
-            timestamp: roundedTime,
-            open: value,
-            high: value,
-            low: value,
-            close: value,
-            volume: 1
-          };
-          valueSeries.data.push(newCandle);
-          volumeSeries?.data.push(newCandle);
-        }
-      } catch (error) {
-        console.error("❌ Worker üzerinden MQTT verisi işlenirken hata:", error);
+      } catch (err) {
+        console.error("❌ fetchAndInit error:", err);
       }
     };
-    
-    // Subscribe to MQTT updates
-    if(selectedIl === "zenon"){
-      return;
-    }
-    const mqttIl = capitalize(selectedIl);
-    const mqttGes = capitalize(selectedGes);
-    const cihazGrubu = getCihazGrubu(selectedArac);
-    if (cihazGrubu) {
-      const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
-      console.log('📡 Subscribing to MQTT topic:', topic);
-      window.electronAPI.subscribeMqtt(topic);
-      const unsubscribe = window.electronAPI.onMqttData((data, incomingTopic) => {
-        if (incomingTopic && incomingTopic.toLowerCase() === topic.toLowerCase()) {
-          handleMqttData(data);
-        }
-      });
-      
-      return () => {
-        console.log('📡 Unsubscribing from MQTT topic:', topic);
-        if (typeof unsubscribe === 'function') {
-          unsubscribe();
-        }
-      };
-    } else {
-      console.warn('⚠️ No device group found for:', selectedArac);
-    }
+  
+    fetchAndInit();
+  
+    return () => {
+      if (unsubscribeMqtt) {
+        console.log("📡 MQTT UNSUBSCRIBE");
+        unsubscribeMqtt();
+      }
+    };
   }, [selectedVariable]);
-
+  
+  
+  const handleMqttData = async (data: string, variableConfig: VariableConfig) => {
+    try {
+      const result = await window.electronAPI.processMqttData(data, variableConfig);
+      if (!result) return;
+  
+      const { timestamp } = result;
+      const value = selectedVariable === "p" ? Math.abs(result.value) : result.value;
+  
+      setDataBuffer(prev => [...prev, { timestamp, value }]);
+  
+      const { timeUnit, count } = timeIntervalRef.current;
+      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+      const roundedTime = Math.floor(timestamp / ms) * ms;
+  
+      const chart = chartRef.current;
+      if (!chart) return;
+  
+      const valueSeries = chart.get("stockSeries");
+      const volumeSeries = chart.get("volumeSeries");
+      if (!valueSeries) return;
+  
+      const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime) as CandleData | undefined;
+  
+      if (currentCandle) {
+        const updatedCandle: CandleData = {
+          ...currentCandle,
+          high: Math.max(currentCandle.high, value),
+          low: Math.min(currentCandle.low, value),
+          close: value,
+          volume: currentCandle.volume + 1
+        };
+        valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
+        volumeSeries?.data.setIndex(volumeSeries.data.indexOf(currentCandle), updatedCandle);
+      } else {
+        const newCandle: CandleData = {
+          timestamp: roundedTime,
+          open: value,
+          high: value,
+          low: value,
+          close: value,
+          volume: 1
+        };
+        valueSeries.data.push(newCandle);
+        volumeSeries?.data.push(newCandle);
+      }
+    } catch (error) {
+      console.error("❌ handleMqttData error:", error);
+    }
+  };
+  
 
   useEffect(() => {
     selectedIlRef.current = selectedIl;
@@ -606,7 +555,7 @@ const Overview: React.FC = () => {
   }, [selectedIl, selectedGes, selectedArac, selectedVariable]);
 
   // Geçmiş veri yükleme fonksiyonu
-  const loadHistoricalData = async (startTime: Date, endTime: Date) => {
+  const loadHistoricalCandlestickData = async (startTime: Date, endTime: Date) => {
     if (!selectedIlRef.current || !selectedGesRef.current || !selectedAracRef.current || !selectedVariableRef.current || isLoadingHistoricalDataRef.current){ 
       console.log("sorun burda mi 590")
       return;
@@ -651,6 +600,7 @@ const Overview: React.FC = () => {
           }
         }
       }
+
     } catch (error) {
       console.error('Geçmiş veriler yüklenirken hata:', error);
     } finally {
@@ -659,24 +609,19 @@ const Overview: React.FC = () => {
   };
   // DateAxis için event listener
   useEffect(() => {
-    console.log("4. efeect çalıştı dateaxis esueffect")
-    console.log("hasZoomedInitially - dateaxis esueffect",hasZoomedInitially)
-    if (!dateAxisRef.current) {
+    if (!dateAxisRef.current || !hasZoomedInitially) {
       console.log("dateAxisRef.current yok")
       return;
     }
-    
     const handleStart = (start: number | undefined) => {
       if (start === undefined || isLoadingHistoricalDataRef.current || !hasZoomedInitially ){
         return;
       }
-      // Son yüklemeden bu yana 10 saniye geçmediyse çık
       const now = Date.now();
       if (now - lastLoadTimeRef.current < 1000) {
         console.log("1 saniye geçmedi")
         return;
       }
-      
       const chart = chartRef.current;
       if (!chart) return;
       
@@ -700,15 +645,14 @@ const Overview: React.FC = () => {
         const from = new Date(oldestTimestamp - intervalMs);
         const to = new Date(oldestTimestamp);
         lastLoadTimeRef.current = now;
-        loadHistoricalData(from, to);
-        console.log("load Historocal fonk çağırıldı çekildi")
+        loadHistoricalCandlestickData(from, to);
       }
     };
     dateAxisRef.current?.on("start", handleStart);
     return () => {
       dateAxisRef.current?.off("start", handleStart);
     };
-  }, [dateAxisRef.current,hasZoomedInitially]);
+  }, [hasZoomedInitially]); //dateAxisRef vardı kaldırdım gerek yok, ilk zoom yapıldıında x ekseni izlenmeye başlayabilir
 
   useEffect(() => {
     console.log("hasZoomedInitially değişti ",hasZoomedInitially)
