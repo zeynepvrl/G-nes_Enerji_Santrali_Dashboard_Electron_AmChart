@@ -122,7 +122,7 @@ class ChartDataProcessor {
     });
     
     const result = Array.from(grouped.values());
-    console.log(`✅ Grouping completed. Created ${result.length} groups.`);
+    //console.log(`✅ Grouping completed. Created ${result.length} groups.`);
     return result;
   }
 
@@ -185,7 +185,7 @@ parentPort.on('message', async (message) => {
           chartData = chartProcessor.createLineData(data, timeUnit, count);
         }
         
-        console.log(`✅ Chart data created:`, { chartDataLength: chartData?.length, chartType });
+        //console.log(`✅ Chart data created:`, { chartDataLength: chartData?.length, chartType });
         parentPort.postMessage({ 
           id: message.id, 
           type: 'success', 

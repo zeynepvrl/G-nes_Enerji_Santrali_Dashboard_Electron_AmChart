@@ -78,6 +78,7 @@ const Overview: React.FC = () => {
   const [dataBuffer, setDataBuffer] = useState<ChartDataPoint[]>([]);
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const isLoadingHistoricalDataRef = useRef(false);
+  const isLoadingHistoricalComparisonDataRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
   const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
@@ -607,58 +608,176 @@ const Overview: React.FC = () => {
       isLoadingHistoricalDataRef.current = false;
     }
   };
-  // DateAxis için event listener
-  useEffect(() => {
-    if (!dateAxisRef.current || !hasZoomedInitially) {
-      console.log("dateAxisRef.current yok")
+
+  // Karşılaştırma serileri için geçmiş veri yükleme fonksiyonu
+  const loadHistoricalComparisonData = async (il: string, ges: string, arac: string, variableName: string, startTime: Date, endTime: Date): Promise<void> => {
+    if(isLoadingHistoricalComparisonDataRef.current) return;
+    const dbName = `${il}_${ges}`;
+    const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
+    if (!variableConfig ) {
+      console.warn(`⚠️ Variable config not found for comparison:`, { il, ges, arac, variableName });
       return;
     }
-    const handleStart = (start: number | undefined) => {
-      if (start === undefined || isLoadingHistoricalDataRef.current || !hasZoomedInitially ){
+    isLoadingHistoricalComparisonDataRef.current = true;
+
+    try {
+      const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+      const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
+      
+      const records = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTimeStr, endTimeStr);
+      
+      if (records && records.length > 0) {
+        const rawData: ChartDataPoint[] = records
+          .map(record => ({
+            timestamp: new Date(record.timestamp).getTime(),
+            value: variableName === "p" ? Math.abs(Number(record[variableName])) : Number(record[variableName])
+          }))
+          .filter(d => !isNaN(d.value))
+          .sort((a, b) => a.timestamp - b.timestamp);
+
+        const lineData = await window.electronAPI.getChartData({
+          data: rawData,
+          timeUnit: timeIntervalRef.current.timeUnit,
+          count: timeIntervalRef.current.count,
+          chartType: 'line'
+        }) as ChartDataPoint[];
+
+        // Karşılaştırma serisini bul ve güncelle
+        const seriesKey = `${il}/${ges}/${arac}-${variableName}`;
+        const comparisonSeries = comparisonSeriesRefs.current.find(s => s.get("name") === seriesKey);
+        
+        if (comparisonSeries) {
+          const existingData = comparisonSeries.data.values as ChartDataPoint[];
+          const combinedData = [...lineData, ...existingData];
+          comparisonSeries.data.setAll(combinedData);
+          console.log(`📈 Comparison series updated: ${seriesKey}`, { newPoints: lineData.length, totalPoints: combinedData.length });
+        }
+      }
+      isLoadingHistoricalComparisonDataRef.current = false;
+    } catch (error) {
+      console.error(`❌ Comparison historical data error for ${il}/${ges}/${arac}/${variableName}:`, error);
+      isLoadingHistoricalComparisonDataRef.current = false;
+      throw error; // Hatayı yukarı fırlat
+    }
+  };
+
+  // DateAxis için event listener
+  useEffect(() => {
+    if (!dateAxisRef.current) {
+      console.log("dateAxisRef.current yok");
+      return;
+    }
+  
+    const handleStart = async (start: number | undefined) => {
+      if (start === undefined || isLoadingHistoricalDataRef.current || isLoadingHistoricalComparisonDataRef.current || !hasZoomedInitially) {
+        console.log("---------------return 672----------")
         return;
       }
+  
       const now = Date.now();
       if (now - lastLoadTimeRef.current < 1000) {
-        console.log("1 saniye geçmedi")
+        console.log("1 saniye geçmedi");
         return;
       }
+  
       const chart = chartRef.current;
       if (!chart) return;
-      
-      const valueSeries = chart.get('stockSeries');
-      if (!valueSeries) return;
-
-      const currentMin = dateAxisRef.current?.getPrivate("selectionMin");
-      if (!currentMin) return;
-
-      const seriesData = valueSeries.data.values as { timestamp: number }[];
-      if (!seriesData || seriesData.length === 0) return;
-
-      const oldestDataPoint = seriesData[0] as { timestamp: number };
-      const oldestTimestamp = oldestDataPoint.timestamp;
-      
+  
       const { timeUnit, count } = timeIntervalRef.current;
       const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
-      const intervalMs = ms * 200; // 200 mum için gerekli süre
+      const intervalMs = 3*60*60*1000
+  
+      // 🟠 Ana mum grafik varsa kontrol et
+      const valueSeries = chart.get("stockSeries");
+      const dateMin = dateAxisRef.current?.getPrivate("selectionMin");
+      if (!dateMin) return;
+
+      const allTimeStamps: number[] = []
       
-      if (currentMin - oldestTimestamp < intervalMs) {
-        const from = new Date(oldestTimestamp - intervalMs);
-        const to = new Date(oldestTimestamp);
-        lastLoadTimeRef.current = now;
-        loadHistoricalCandlestickData(from, to);
+      // Ana serinin ilk veri noktasını ekle
+      if (valueSeries && valueSeries.data.values && valueSeries.data.values.length > 0) {
+        const firstDataPoint = valueSeries.data.values[0] as any;
+        if (firstDataPoint && firstDataPoint.timestamp) {
+          allTimeStamps.push(firstDataPoint.timestamp)
+        }
+      }
+      
+      // Karşılaştırma serilerinin ilk veri noktalarını ekle
+      comparisonSeriesRefs.current.forEach((series: any) => {
+        if (series.data.values && series.data.values.length > 0) {
+          const firstDataPoint = series.data.values[0] as any;
+          if (firstDataPoint && firstDataPoint.timestamp) {
+            allTimeStamps.push(firstDataPoint.timestamp)
+          }
+        }
+      })
+      
+      const minTimestamp = Math.min(...allTimeStamps)
+  
+      console.log("🔄 Paralel geçmiş veri yükleme başlatılıyor");
+      
+      // Tüm yükleme işlemlerini topla
+      const allLoads: Promise<any>[] = [];
+  
+      // Ana mum serisi için kontrol
+      if (valueSeries) {
+        const seriesData = valueSeries.data.values as ChartDataPoint[];
+        if (seriesData.length > 0) {
+          const oldestTimestamp = seriesData[0].timestamp;
+          if (dateMin - oldestTimestamp < intervalMs) {
+            const from = new Date(oldestTimestamp - intervalMs);       
+            const to = new Date(oldestTimestamp);
+            lastLoadTimeRef.current = now;
+            console.log("📈 Ana mum serisi için geçmiş veri yükleniyor", from, to);
+            allLoads.push(loadHistoricalCandlestickData(from, to));
+          }
+        }
+      }
+      
+      // Karşılaştırma serileri için kontrol
+      for (const key of Object.keys(comparisonSelections)) {
+        const [il, ges, arac] = key.split('/');
+        const variables = comparisonSelections[key];
+
+        for (const variableName of variables) {
+          const seriesKey = `${il}/${ges}/${arac}-${variableName}`;
+          const comparisonSeries = comparisonSeriesRefs.current.find(s => s.get("name") === seriesKey);
+          
+          if (comparisonSeries) {
+            const seriesData = comparisonSeries.data.values as ChartDataPoint[];
+            if (seriesData && seriesData.length > 0) {
+              const oldestTimestamp = seriesData[0].timestamp;
+
+              if (dateMin - oldestTimestamp < intervalMs) {
+                const from = new Date(oldestTimestamp - intervalMs);       
+                const to = new Date(oldestTimestamp);
+                console.log("📊 Karşılaştırma serisi için geçmiş veri yükleniyor", il, ges, arac, variableName, from, to);
+                allLoads.push(loadHistoricalComparisonData(il, ges, arac, variableName, from, to));
+              }
+            }
+          }
+        }
+      }
+      
+      // Tüm yükleme işlemlerini paralel olarak çalıştır
+      if (allLoads.length > 0) {
+        try {
+          await Promise.allSettled(allLoads);
+          console.log("✅ Tüm geçmiş veri yükleme işlemleri tamamlandı");
+        } catch (error) {
+          console.error("❌ Geçmiş veri yükleme hatası:", error);
+        }
       }
     };
-    dateAxisRef.current?.on("start", handleStart);
+  
+    dateAxisRef.current.on("start", handleStart);
     return () => {
-      dateAxisRef.current?.off("start", handleStart);
+      if (dateAxisRef.current) {
+        dateAxisRef.current.off("start", handleStart);
+      }
     };
-  }, [hasZoomedInitially]); //dateAxisRef vardı kaldırdım gerek yok, ilk zoom yapıldıında x ekseni izlenmeye başlayabilir
-
-  useEffect(() => {
-    console.log("hasZoomedInitially değişti ",hasZoomedInitially)
-    console.log("isLoadingHistoricalDataRef.current değişti ",isLoadingHistoricalDataRef.current)
-  }, [hasZoomedInitially,isLoadingHistoricalDataRef.current])
-
+  }, [hasZoomedInitially, comparisonSelections]);
+  
   const addComparisonLine = async (key: string, variableName: string) => {
     console.log(`📊 Adding comparison line:`, { key, variableName });
     if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) {
@@ -730,6 +849,41 @@ const Overview: React.FC = () => {
     series.data.setAll(lineData);
     mainPanel.series.push(series);
     comparisonSeriesRefs.current.push(series);
+
+    // Karşılaştırma serisi eklendiğinde hasZoomedInitially'i true yap
+    if (!hasZoomedInitially && lineData.length > 0) {
+      // Veri yükleme işlemi tamamlandıktan sonra zoom yap
+      series.events.once("datavalidated", function () {
+        if (dateAxisRef.current) {
+          const axis = dateAxisRef.current;
+          const startIndex = Math.max(0, lineData.length - 180);
+          const start = lineData[startIndex]?.timestamp;
+          const end = lineData[lineData.length - 1]?.timestamp;
+      
+          if (start && end) {
+            // Önce eski aralığı al
+            const beforeMin = axis.getPrivate("selectionMin");
+            const beforeMax = axis.getPrivate("selectionMax");
+          
+            axis.zoomToDates(new Date(start), new Date(end));
+            console.log("🔍 Comparison line initial zoom başlatıldı...");
+          
+            // Zoom işleminin tamamlanmasını bekle
+            setTimeout(() => {
+              const afterMin = axis.getPrivate("selectionMin");
+              const afterMax = axis.getPrivate("selectionMax");
+          
+              if (afterMin !== beforeMin || afterMax !== beforeMax) {
+                console.log("✅ Comparison line zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
+                setHasZoomedInitially(true);
+              } else {
+                console.log("⚠️ Comparison line zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
+              }
+            }, 2000);
+          }
+        }
+      });
+    }
   
     // MQTT aboneliği
     const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
@@ -934,12 +1088,7 @@ const Overview: React.FC = () => {
       
       // Grafiği yumuşak bir şekilde kaydır
       dateAxisRef.current.zoomToDates(startDate, endDate);
-      
-      console.log('📈 Grafik en sağa kaydırıldı:', { 
-        startDate: startDate.toISOString(), 
-        endDate: endDate.toISOString(),
-        dataPoints: seriesData.length 
-      });
+
     }
   }, [timeIntervalRef.current]);
 

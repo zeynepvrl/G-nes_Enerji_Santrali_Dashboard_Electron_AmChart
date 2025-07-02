@@ -306,23 +306,31 @@ app.whenReady().then(async () => {
 
 // Uygulama kapatılırken worker'ları da kapat
 app.on('window-all-closed', async () => {
+  console.log('🔄 Application closing, cleaning up resources...');
+  
   if (dbPool) {
+    console.log('🔌 Closing database pool...');
     dbPool.end();
   }
   
   // Worker'ları kapat
+  console.log('🔌 Terminating all workers...');
   await workerManager.terminateAll();
+  
+  // MQTT bağlantısını kapat
+  if (mqttClient) {
+    console.log('🔌 Closing MQTT connection...');
+    mqttClient.end();
+  }
+  
+  console.log('✅ All resources cleaned up');
   
   if (process.platform !== 'darwin') {
     app.quit()
   }
-}) 
+})
 
-/* package.json içinde version numarasını artır,
 
-Tekrar npm run build,
-
-Yeni release oluştur ve dosyaları yükle. */
 
 // MSSQL tabloları için handler - Worker kullanarak
 ipcMain.handle('get-mssql-tables', async () => {
@@ -331,7 +339,6 @@ ipcMain.handle('get-mssql-tables', async () => {
     const result = await workerManager.sendMessage('database', {
       type: 'get-mssql-tables'
     });
-    console.log("-----------------------------------",result)
     return result;
   } catch (error) {
     console.error("❌ MSSQL sorgu hatası:", error.message);

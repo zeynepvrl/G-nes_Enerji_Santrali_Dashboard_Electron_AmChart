@@ -61,7 +61,7 @@ parentPort.on('message', async (message) => {
 });
 
 async function handleGetTables({ dbName, tableName, limit, startTime, endTime }) {
-  console.log("startTime",startTime ,endTime);
+  //console.log("startTime",startTime ,endTime);
   const tempPool = new Pool({
     ...pgConfig,
     database: dbName,

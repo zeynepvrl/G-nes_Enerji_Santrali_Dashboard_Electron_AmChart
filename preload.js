@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Yeni worker-based API'ler
   processMqttData: (rawData, variableConfig) => ipcRenderer.invoke('process-mqtt-data', rawData, variableConfig),
   getChartData: (data) => ipcRenderer.invoke('get-chart-data', data),
+  
+  // Debug API'leri
+  //debugWorkerStatus: () => ipcRenderer.invoke('debug-worker-status'),
+  //cleanupWorkers: () => ipcRenderer.invoke('cleanup-workers'),
 }); 
 
 

@@ -23,9 +23,9 @@ export interface DatabaseTables {
  * Electron API interface for main process communication
  */
 
-// //TypeScript’te interface (arayüz), bir nesnenin hangi özelliklere ve fonksiyonlara sahip olması gerektiğini tanımlayan bir yapıdır. 
+// //TypeScript'te interface (arayüz), bir nesnenin hangi özelliklere ve fonksiyonlara sahip olması gerektiğini tanımlayan bir yapıdır. 
 // Yani bir tür (type) tanımıdır ama daha yapısal ve genişletilebilir bir şekilde kullanılır.
-//Bu arayüz (interface), preload.js içinde tanımlanıp contextBridge üzerinden window’a aktarılan tüm fonksiyonların tipini belirtir.
+//Bu arayüz (interface), preload.js içinde tanımlanıp contextBridge üzerinden window'a aktarılan tüm fonksiyonların tipini belirtir.
 export interface ElectronAPI {
   /**
    * Get historical data from database
