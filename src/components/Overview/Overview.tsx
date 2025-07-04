@@ -50,7 +50,7 @@ const COMPARISON_COLORS = [
   "#00d2d3", // Turkuaz
   "#ff9f43", // Turuncu
   "#10ac84", // Yeşil
-  "#ee5a24", // Kırmızı-turuncu
+  "#ee5a24", 
   "#575fcf", // Mavi-mor
   "#0abde3", // Açık mavi
   "#48dbfb", // Çok açık mavi
@@ -205,7 +205,7 @@ const Overview: React.FC = () => {
             minorGridEnabled: true
           }),
           tooltip: am5.Tooltip.new(root, {}),
-          maxZoomCount: 200,
+          maxZoomCount: 500,
         })
       );
       
@@ -267,56 +267,8 @@ const Overview: React.FC = () => {
         width: 20,
         height: 20
       });
+      valueLegend.data.setAll([valueSeries]);
   
-      // Create volume axis
-      const volumeAxisRenderer = am5xy.AxisRendererY.new(root, {});
-      volumeAxisRenderer.labels.template.set("forceHidden", true);
-      volumeAxisRenderer.grid.template.set("forceHidden", true);
-  
-      const volumeValueAxis = mainPanel.yAxes.push(
-        am5xy.ValueAxis.new(root, {
-          numberFormat: "#.#a",
-          height: am5.percent(20),
-          y: am5.percent(100),
-          centerY: am5.percent(100),
-          renderer: volumeAxisRenderer
-        })
-      );
-      // Add volume series
-      const volumeSeries = mainPanel.series.push(
-        am5xy.ColumnSeries.new(root, {
-          name: "Hacim",
-          clustered: false,
-          valueXField: "timestamp",
-          valueYField: "volume",
-          xAxis: dateAxis,
-          yAxis: volumeValueAxis,
-          legendValueText: "[fontSize: 12px #a259ff bold]{valueY.formatNumber('#,###.0a')}[/]",
-          fill: am5.color("#a259ff"),
-          stroke: am5.color("#6a11cb")
-        })
-      );
-      volumeSeries.columns.template.setAll({
-        strokeOpacity: 0,
-        fillOpacity: 0.5
-      });
-      // Color columns by stock rules
-      volumeSeries.columns.template.adapters.add("fill", function(fill, target) {
-        const dataItem = target.dataItem;
-        if (dataItem) {
-          const close = dataItem.get("close" as any);
-          const open = dataItem.get("open" as any);
-          if (typeof close === 'number' && typeof open === 'number') {
-            return close >= open ? am5.color("#43e0ff") : am5.color("#6a11cb");
-          }
-        }
-        return fill;
-      });
-  
-      // Set main series
-      stockChart.set("volumeSeries", volumeSeries);
-      valueLegend.data.setAll([valueSeries, volumeSeries]);
-   
       // Add cursor
       mainPanel.set("cursor", am5xy.XYCursor.new(root, {
         yAxis: valueAxis,
@@ -380,8 +332,7 @@ const Overview: React.FC = () => {
       // Initialize with empty data
       valueSeries.data.setAll([]);
       // Cleanup
-      return () => {
-        
+      return () => {           //component unmpunt olduğunda çalışacak yer yoruma aldım çünkü başka sayfaya geçince grafik silinmesin
         if (rootRef.current) {
           rootRef.current.dispose();
         }
@@ -427,10 +378,7 @@ const Overview: React.FC = () => {
         const chart = chartRef.current;
         if (chart && chartData.length > 0) {
           const valueSeries = chart.get("stockSeries");
-          const volumeSeries = chart.get("volumeSeries");
           valueSeries?.data.setAll(chartData);
-          volumeSeries?.data.setAll(chartData);
-  
           // ⬇️ Zoom işlemi burada
           if (!hasZoomedInitially && chartData.length > 199) {
             valueSeries?.events.once("datavalidated", () => {
@@ -488,9 +436,9 @@ const Overview: React.FC = () => {
   
     fetchAndInit();
   
-    return () => {
+    return () => {    
       if (unsubscribeMqtt) {
-        console.log("📡 MQTT UNSUBSCRIBE");
+        console.log("📡 MQTT UNSUBSCRIBE-----");
         unsubscribeMqtt();
       }
     };
@@ -515,7 +463,6 @@ const Overview: React.FC = () => {
       if (!chart) return;
   
       const valueSeries = chart.get("stockSeries");
-      const volumeSeries = chart.get("volumeSeries");
       if (!valueSeries) return;
   
       const currentCandle = valueSeries.data.values.find((item: any) => item.timestamp === roundedTime) as CandleData | undefined;
@@ -529,7 +476,6 @@ const Overview: React.FC = () => {
           volume: currentCandle.volume + 1
         };
         valueSeries.data.setIndex(valueSeries.data.indexOf(currentCandle), updatedCandle);
-        volumeSeries?.data.setIndex(volumeSeries.data.indexOf(currentCandle), updatedCandle);
       } else {
         const newCandle: CandleData = {
           timestamp: roundedTime,
@@ -540,7 +486,6 @@ const Overview: React.FC = () => {
           volume: 1
         };
         valueSeries.data.push(newCandle);
-        volumeSeries?.data.push(newCandle);
       }
     } catch (error) {
       console.error("❌ handleMqttData error:", error);
@@ -556,7 +501,7 @@ const Overview: React.FC = () => {
   }, [selectedIl, selectedGes, selectedArac, selectedVariable]);
 
   // Geçmiş veri yükleme fonksiyonu
-  const loadHistoricalCandlestickData = async (startTime: Date, endTime: Date) => {
+  const loadHistoricalCandlestickData = async (startTime: Date, endTime: Date ) => {
     if (!selectedIlRef.current || !selectedGesRef.current || !selectedAracRef.current || !selectedVariableRef.current || isLoadingHistoricalDataRef.current){ 
       console.log("sorun burda mi 590")
       return;
@@ -591,13 +536,12 @@ const Overview: React.FC = () => {
   
         if (chartData.length > 0 && chartRef.current) {
           const valueSeries = chartRef.current.get('stockSeries');
-          const volumeSeries = chartRef.current.get('volumeSeries');
-  
-          if (valueSeries && volumeSeries) {
+    
+          if (valueSeries) {
             const existingData = valueSeries.data.values as CandleData[];
             const combinedData = [...chartData, ...existingData];
             valueSeries.data.setAll(combinedData);
-            volumeSeries.data.setAll(combinedData);
+
           }
         }
       }
@@ -606,6 +550,7 @@ const Overview: React.FC = () => {
       console.error('Geçmiş veriler yüklenirken hata:', error);
     } finally {
       isLoadingHistoricalDataRef.current = false;
+
     }
   };
 
@@ -670,30 +615,23 @@ const Overview: React.FC = () => {
   
     const handleStart = async (start: number | undefined) => {
       if (start === undefined || isLoadingHistoricalDataRef.current || isLoadingHistoricalComparisonDataRef.current || !hasZoomedInitially) {
-        console.log("---------------return 672----------")
         return;
       }
-  
       const now = Date.now();
       if (now - lastLoadTimeRef.current < 1000) {
         console.log("1 saniye geçmedi");
         return;
       }
-  
       const chart = chartRef.current;
       if (!chart) return;
-  
-      const { timeUnit, count } = timeIntervalRef.current;
-      const ms = timeUnit === "minute" ? count * 60000 : count * 3600000;
+
       const intervalMs = 3*60*60*1000
-  
       // 🟠 Ana mum grafik varsa kontrol et
       const valueSeries = chart.get("stockSeries");
       const dateMin = dateAxisRef.current?.getPrivate("selectionMin");
+      const dateMax = dateAxisRef.current?.getPrivate("selectionMax");
       if (!dateMin) return;
-
       const allTimeStamps: number[] = []
-      
       // Ana serinin ilk veri noktasını ekle
       if (valueSeries && valueSeries.data.values && valueSeries.data.values.length > 0) {
         const firstDataPoint = valueSeries.data.values[0] as any;
@@ -701,7 +639,6 @@ const Overview: React.FC = () => {
           allTimeStamps.push(firstDataPoint.timestamp)
         }
       }
-      
       // Karşılaştırma serilerinin ilk veri noktalarını ekle
       comparisonSeriesRefs.current.forEach((series: any) => {
         if (series.data.values && series.data.values.length > 0) {
@@ -711,11 +648,9 @@ const Overview: React.FC = () => {
           }
         }
       })
-      
       const minTimestamp = Math.min(...allTimeStamps)
-  
       console.log("🔄 Paralel geçmiş veri yükleme başlatılıyor");
-      
+  
       // Tüm yükleme işlemlerini topla
       const allLoads: Promise<any>[] = [];
   
@@ -729,7 +664,8 @@ const Overview: React.FC = () => {
             const to = new Date(oldestTimestamp);
             lastLoadTimeRef.current = now;
             console.log("📈 Ana mum serisi için geçmiş veri yükleniyor", from, to);
-            allLoads.push(loadHistoricalCandlestickData(from, to));
+
+            allLoads.push(loadHistoricalCandlestickData(from, to ));
           }
         }
       }
@@ -762,8 +698,10 @@ const Overview: React.FC = () => {
       // Tüm yükleme işlemlerini paralel olarak çalıştır
       if (allLoads.length > 0) {
         try {
-          await Promise.allSettled(allLoads);
-          console.log("✅ Tüm geçmiş veri yükleme işlemleri tamamlandı");
+          await Promise.allSettled(allLoads).then(()=>{
+            console.log("✅ Tüm geçmiş veri yükleme işlemleri tamamlandı");
+          });
+    
         } catch (error) {
           console.error("❌ Geçmiş veri yükleme hatası:", error);
         }
@@ -775,7 +713,7 @@ const Overview: React.FC = () => {
       if (dateAxisRef.current) {
         dateAxisRef.current.off("start", handleStart);
       }
-    };
+    }; 
   }, [hasZoomedInitially, comparisonSelections]);
   
   const addComparisonLine = async (key: string, variableName: string) => {
@@ -963,8 +901,10 @@ const Overview: React.FC = () => {
       const cihazGrubu = getCihazGrubu(arac);
       if (cihazGrubu) {
         const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
+        console.log(`📡 Kaldırılan seri için MQTT UNSUBSCRIBE: ${topic}`);
         window.electronAPI.unsubscribeMqtt(topic);
       }
+      
     });
 
     // **YENİ EKLENEN** serileri işle
@@ -978,21 +918,32 @@ const Overview: React.FC = () => {
 
     // Referansı güncelle
     prevComparisonSelections.current = { ...comparisonSelections };
-
-    // Cleanup sadece UNMOUNT'ta çalışsın
-    return () => {
-      if (Object.keys(comparisonSelections).length === 0) {
-        comparisonSeriesRefs.current.forEach(series => series.dispose());
-        comparisonSeriesRefs.current = [];
-        comparisonUnsubscribeRefs.current.forEach(unsub => {
-          if (typeof unsub === 'function') unsub();
-        });
-        comparisonUnsubscribeRefs.current = [];
-      }
-    };
+    
   }, [comparisonSelections]);
 
+    // Component unmount olduğunda tüm MQTT aboneliklerini temizle
+  useEffect(() => {
+      return () => {
+        console.log("🔄 Overview component unmount - Tüm MQTT abonelikleri temizleniyor...");      
+        // Tüm unsubscribe fonksiyonlarını çağır
+        comparisonUnsubscribeRefs.current.forEach(unsubscribe => {
+          console.log("📡 Component unmount - Karşılaştırma MQTT UNSUBSCRIBE fonksiyonu çağrılıyor");
+          if (typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
+        });
+        comparisonUnsubscribeRefs.current = [];
   
+        // Tüm karşılaştırma serilerini temizle
+        comparisonSeriesRefs.current.forEach(series => {
+          console.log("📡 Component unmount - Karşılaştırma serisi temizleniyor");
+          if (series && !series.isDisposed()) {
+            series.dispose();
+          }
+        });
+        comparisonSeriesRefs.current = [];
+      };
+    }, []);
   // timeInterval değişikliğini dinleyen effect
   useEffect(() => {
     const hours = new Set<string>();
@@ -1027,10 +978,8 @@ const Overview: React.FC = () => {
           chartType: 'candlestick'
         }) as CandleData[];
 
-        const volumeSeries = chart.get('volumeSeries');
         // Verileri güncelle
         valueSeries.data.setAll(chartData);
-        volumeSeries?.data.setAll(chartData);
 
         // DateAxis'i güncelle
         if (dateAxisRef.current) {
@@ -1055,9 +1004,9 @@ const Overview: React.FC = () => {
 
     processChartData();
 
-    return () => {
+    /* return () => {
       // Cleanup function if needed
-    };
+    }; */
   }, [timeIntervalRef.current]);
 
   // Grafiği en sağa kaydırma fonksiyonu
@@ -1220,7 +1169,9 @@ const Overview: React.FC = () => {
     }
   }, [showSettings, isInitialPositionSet]);
 
-  return (
+
+
+    return (
     <div className="overview-container">
       <div className="chart-controls">
         <div className="control-group">
@@ -1347,7 +1298,7 @@ const Overview: React.FC = () => {
       </div>
     </div>
   );
-};
+  }
 export default Overview;
 
 

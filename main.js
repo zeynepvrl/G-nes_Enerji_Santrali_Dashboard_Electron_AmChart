@@ -146,7 +146,7 @@ function setupFacilityDatabase() {
   facilityPool = new Pool({
     user: 'zeynep',
     host: '10.10.30.31',
-    database: 'facility_info', // 🔥 Doğru veritabanı
+    database: 'facility_info', 
     password: 'zeynep421',
     port: 5432,
   });
@@ -339,10 +339,36 @@ ipcMain.handle('get-mssql-tables', async () => {
     const result = await workerManager.sendMessage('database', {
       type: 'get-mssql-tables'
     });
+    //console.log("get-mssql-tables result:",result);
     return result;
   } catch (error) {
     console.error("❌ MSSQL sorgu hatası:", error.message);
     return [];
+  }
+});
+
+ipcMain.handle('log-to-outage', async (event, outages) => {
+  if (!globalPool) {
+    console.error("❌ MSSQL bağlantısı yok. Kesinti logu eklenemedi.");
+    return;
+  }
+
+  try {
+    console.log("outages",outages);
+    const o = outages[0];
+    
+    console.log(o.name,o.WERT,o.DATUMZEIT,Number(o.ID),o.STATUS);
+    // veya for ile her biri için
+    await globalPool.request()
+    .input('NAME',o.name)
+    .input('WERT',o.WERT)
+    .input('DATUMZEIT',o.DATUMZEIT)
+    .input('ID',Number(o.ID))
+    .input('STATUS',o.STATUS)
+    .query(`INSERT INTO dbo.OUTAGES (NAME, WERT, DATUMZEIT,ID,STATUS) VALUES (@NAME, @WERT,@DATUMZEIT,@ID,@STATUS)`);
+    console.log("✅ Kesinti logu başarıyla eklendi.");
+  } catch (err) {
+    console.error("❌ Kesinti logu eklenirken hata:", err.message);
   }
 });
 

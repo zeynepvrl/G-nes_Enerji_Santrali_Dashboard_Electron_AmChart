@@ -33,6 +33,7 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .alarms-container h2::after {
@@ -265,7 +266,8 @@ input[type="number"] {
 .alarms-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 1.5rem;
+    gap: 1rem;
+    padding: 0.6rem;
 }
 @media (max-width: 1200px) {
     .alarms-grid {
@@ -275,6 +277,25 @@ input[type="number"] {
 @media (max-width: 700px) {
     .alarms-grid {
         grid-template-columns: 1fr;
+    }
+    
+    .sound-test-buttons {
+        flex-direction: column;
+        gap: 0.3rem;
+        margin-top: 1rem;
+        margin-left: 0;
+    }
+    
+    .test-sound-btn {
+        margin-left: 0;
+        font-size: 0.8rem;
+        padding: 0.4rem 0.8rem;
+    }
+    
+    .alarms-container h2 {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
     }
 }
 
@@ -405,6 +426,7 @@ input[type="number"] {
     gap: 0.7rem;
     padding: 0.07rem 0;
 }
+
 .value {
     color: #222;
     font-size: 1.09rem;
@@ -451,47 +473,141 @@ input[type="number"] {
 } 
 
 .test-sound-btn {
-  background-color: #f39c12;
+  background: linear-gradient(135deg, #3498db, #2980b9);
   color: white;
   border: none;
-  padding: 0.4rem 1.1rem;
-  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
-  font-weight: 500;
-  font-size: 0.97rem;
-  margin-bottom: 1rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+  margin-left: 1rem;
 }
 
 .test-sound-btn:hover {
-  background-color: #e67e22;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+}
+
+.sound-test-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.test-sound-btn.alarm-test {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+}
+
+.test-sound-btn.alarm-test:hover {
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+}
+
+.test-sound-btn.outage-test {
+  background: linear-gradient(135deg, #f39c12, #e67e22);
+  box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3);
+}
+
+.test-sound-btn.outage-test:hover {
+  box-shadow: 0 4px 12px rgba(243, 156, 18, 0.4);
 }
 
 .data-outage {
-    opacity: 0.5;
-    filter: grayscale(50%);
-    background-color: #f8f9fa;
-    border: 1px solid #e9ecef;
+  background: #fdfaf5;
+  border: 1.5px solid #b3b3b3;
+}
+
+.data-outage-blink {
+  background: linear-gradient(135deg, #fff8e1, #fff3cd);
+  border: 3px solid #ff9800;
+  animation: outage-pulse 2s infinite;
+  box-shadow: 0 0 10px rgba(255, 152, 0, 0.18);
+}
+
+.data-late {
+  opacity: 0.5;
+  filter: grayscale(50%);
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+}
+
+@keyframes outage-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4);
+    transform: scale(1.02);
+  }
+  50% {
+    box-shadow: 0 0 0 15px rgba(255, 152, 0, 0.2);
+    transform: scale(1.03);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
+    transform: scale(1.02);
+  }
+}
+
+.outage-title {
+  color: #ff9800 !important;
+  border-left-color: #ff9800 !important;
+}
+
+.outage-indicator {
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  margin-left: 0.8rem;
+  animation: outage-text-blink 1.5s infinite;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes outage-text-blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0.7;
+  }
+}
+
+.outage-value {
+  color: #ff9800 !important;
+  font-weight: 600;
+}
+
+.outage-status {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.15), rgba(255, 152, 0, 0.05));
+  border-radius: 6px;
+  padding: 0.3rem 0.3rem;
+  margin-top: 0.2rem;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  box-shadow: 0 2px 3px rgba(255, 152, 0, 0.2);
+}
+
+.outage-status-indicator {
+  color: #ff9800;
+  font-weight: 700;
+  font-size: 0.9rem;
 }
 
 .manual-alarm-indicator {
   color: #e74c3c;
-  font-weight: bold;
+  font-weight: 600;
   animation: manual-alarm-blink 1.5s infinite;
-  display: inline-block;
 }
 
 @keyframes manual-alarm-blink {
   0%, 50% {
     opacity: 1;
-    transform: scale(1);
   }
-  25%, 75% {
-    opacity: 0.3;
-    transform: scale(0.9);
+  51%, 100% {
+    opacity: 0.5;
   }
 }
 

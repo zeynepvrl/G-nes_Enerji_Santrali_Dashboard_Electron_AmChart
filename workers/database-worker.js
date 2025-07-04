@@ -125,6 +125,7 @@ async function handleGetMssqlTables() {
     .request()
     .query(`
       SELECT
+        latest.ID,
         vars.NAME,
         latest.WERT,
         CONVERT(VARCHAR(19), latest.DATUMZEIT, 120) AS DATUMZEIT,
@@ -132,7 +133,7 @@ async function handleGetMssqlTables() {
       FROM
         (SELECT DISTINCT NAME FROM dbo.ENERGY) AS vars
         OUTER APPLY (
-          SELECT TOP 1 WERT, DATUMZEIT,STATUS
+          SELECT TOP 1 ID,WERT,DATUMZEIT,STATUS
           FROM dbo.ENERGY
           WHERE NAME = vars.NAME
           ORDER BY DATUMZEIT DESC
@@ -140,18 +141,19 @@ async function handleGetMssqlTables() {
     `);
     
     return result.recordset.map(row => {
-      const statusRaw = Number(row.STATUS); // orijinal hali
-      const statusBinary = statusRaw.toString(2).padStart(32, '0'); // 32 bit binary string
-    
-      // Sağdan 17. bit = soldan 15. karakter (index 15)
-      const isSpontaneous = statusBinary.charAt(14) === '1';
-    
+      const statusRaw = Number(row.STATUS); 
+      const statusBinary = statusRaw.toString(2).padStart(32, '0'); 
+      const isSpontaneous = statusBinary.charAt(14) === '1';  
+      const isOutage=isSpontaneous==true&&Math.abs(row.WERT)<5
+  
       return {
         name: row.NAME,
         WERT: Math.abs(Number(row.WERT)),
         DATUMZEIT: row.DATUMZEIT,
-        /* STATUS: statusRaw,
-        STATUS_BINARY: statusBinary, // debug için görmek istersen */
+        ID: row.ID,
+        isOutage: isOutage,
+        STATUS: statusRaw,
+        //STATUS_BINARY: statusBinary, // debug için görmek istersen */
         isSpontaneous: isSpontaneous
       };
     });

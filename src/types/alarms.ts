@@ -3,6 +3,7 @@ export interface Measurement {
   WERT: number;
   DATUMZEIT: string;
   isSpontaneous: boolean;
+  isOutage: boolean;
 }
 
 export interface Limit {

@@ -81,4 +81,5 @@ export interface ElectronAPI {
   getMssqlTables: () => Promise<Measurement[]>;
   getLimits: () => Promise<Limit[]>;
   updateLimit: (name: string, newLimit: number) => Promise<{ success: boolean; error?: string }>;
+  logToOutage: (outages: Measurement[]) => Promise<void>;
 } 
