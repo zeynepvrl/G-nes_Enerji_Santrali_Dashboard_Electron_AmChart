@@ -28,15 +28,6 @@ declare global {
   }
 }
 
-
-type SeriesConfig = {
-  il: string;
-  ges: string;
-  arac: string;
-  variable: string;
-  color?: string;
-};
-
 // Karşılaştırma çizgileri için renk paleti
 const COMPARISON_COLORS = [
   "#ff6b6b", // Kırmızı
@@ -78,8 +69,8 @@ const Overview: React.FC = () => {
   const [dataBuffer, setDataBuffer] = useState<ChartDataPoint[]>([]);
   const [hasZoomedInitially, setHasZoomedInitially] = useState(false);
   const isLoadingHistoricalDataRef = useRef(false);
-  const isLoadingHistoricalComparisonDataRef = useRef(false);
-  const lastLoadTimeRef = useRef(0);
+  const pendingRequestsRef = useRef<Set<string>>(new Set());
+  const isLoading=useRef(false);
   const [selectedComparisonIl, setSelectedComparisonIl] = useState('');
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
@@ -87,8 +78,6 @@ const Overview: React.FC = () => {
   const comparisonSeriesRefs = useRef<am5xy.LineSeries[]>([]);
   const comparisonUnsubscribeRefs = useRef<(() => void)[]>([]);
   const prevComparisonSelections = useRef<Record<string, string[]>>({});
-  const [mainSeriesConfig, setMainSeriesConfig] = useState<SeriesConfig | null>(null);
-  const [comparisonSeries, setComparisonSeries] = useState<SeriesConfig[]>([]);
   // Karşılaştırma çizgilerinin renklerini saklamak için
   const [comparisonColors, setComparisonColors] = useState<Record<string, string>>({});
   // Popup pozisyonu için state
@@ -556,14 +545,12 @@ const Overview: React.FC = () => {
 
   // Karşılaştırma serileri için geçmiş veri yükleme fonksiyonu
   const loadHistoricalComparisonData = async (il: string, ges: string, arac: string, variableName: string, startTime: Date, endTime: Date): Promise<void> => {
-    if(isLoadingHistoricalComparisonDataRef.current) return;
     const dbName = `${il}_${ges}`;
     const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
     if (!variableConfig ) {
       console.warn(`⚠️ Variable config not found for comparison:`, { il, ges, arac, variableName });
       return;
     }
-    isLoadingHistoricalComparisonDataRef.current = true;
 
     try {
       const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
@@ -598,10 +585,8 @@ const Overview: React.FC = () => {
           console.log(`📈 Comparison series updated: ${seriesKey}`, { newPoints: lineData.length, totalPoints: combinedData.length });
         }
       }
-      isLoadingHistoricalComparisonDataRef.current = false;
     } catch (error) {
       console.error(`❌ Comparison historical data error for ${il}/${ges}/${arac}/${variableName}:`, error);
-      isLoadingHistoricalComparisonDataRef.current = false;
       throw error; // Hatayı yukarı fırlat
     }
   };
@@ -612,34 +597,29 @@ const Overview: React.FC = () => {
       console.log("dateAxisRef.current yok");
       return;
     }
-  
     const handleStart = async (start: number | undefined) => {
-      if (start === undefined || isLoadingHistoricalDataRef.current || isLoadingHistoricalComparisonDataRef.current || !hasZoomedInitially) {
+      if (start === undefined || !hasZoomedInitially || isLoading.current) {
         return;
       }
       const now = Date.now();
-      if (now - lastLoadTimeRef.current < 1000) {
-        console.log("1 saniye geçmedi");
-        return;
-      }
+     
       const chart = chartRef.current;
       if (!chart) return;
-
       const intervalMs = 3*60*60*1000
       // 🟠 Ana mum grafik varsa kontrol et
       const valueSeries = chart.get("stockSeries");
       const dateMin = dateAxisRef.current?.getPrivate("selectionMin");
       const dateMax = dateAxisRef.current?.getPrivate("selectionMax");
       if (!dateMin) return;
+
       const allTimeStamps: number[] = []
-      // Ana serinin ilk veri noktasını ekle
       if (valueSeries && valueSeries.data.values && valueSeries.data.values.length > 0) {
         const firstDataPoint = valueSeries.data.values[0] as any;
         if (firstDataPoint && firstDataPoint.timestamp) {
           allTimeStamps.push(firstDataPoint.timestamp)
         }
       }
-      // Karşılaştırma serilerinin ilk veri noktalarını ekle
+
       comparisonSeriesRefs.current.forEach((series: any) => {
         if (series.data.values && series.data.values.length > 0) {
           const firstDataPoint = series.data.values[0] as any;
@@ -650,10 +630,8 @@ const Overview: React.FC = () => {
       })
       const minTimestamp = Math.min(...allTimeStamps)
       console.log("🔄 Paralel geçmiş veri yükleme başlatılıyor");
-  
       // Tüm yükleme işlemlerini topla
       const allLoads: Promise<any>[] = [];
-  
       // Ana mum serisi için kontrol
       if (valueSeries) {
         const seriesData = valueSeries.data.values as ChartDataPoint[];
@@ -662,10 +640,11 @@ const Overview: React.FC = () => {
           if (dateMin - oldestTimestamp < intervalMs) {
             const from = new Date(oldestTimestamp - intervalMs);       
             const to = new Date(oldestTimestamp);
-            lastLoadTimeRef.current = now;
+            
             console.log("📈 Ana mum serisi için geçmiş veri yükleniyor", from, to);
 
             allLoads.push(loadHistoricalCandlestickData(from, to ));
+            isLoading.current = true;
           }
         }
       }
@@ -685,10 +664,11 @@ const Overview: React.FC = () => {
               const oldestTimestamp = seriesData[0].timestamp;
 
               if (dateMin - oldestTimestamp < intervalMs) {
-                const from = new Date(oldestTimestamp - intervalMs);       
-                const to = new Date(oldestTimestamp);
-                console.log("📊 Karşılaştırma serisi için geçmiş veri yükleniyor", il, ges, arac, variableName, from, to);
-                allLoads.push(loadHistoricalComparisonData(il, ges, arac, variableName, from, to));
+                const fromCom = new Date(oldestTimestamp - intervalMs);       
+                const toCom = new Date(oldestTimestamp);
+                console.log("📊 Karşılaştırma serisi için geçmiş veri yükleniyor", il, ges, arac, variableName, fromCom, toCom);
+                allLoads.push(loadHistoricalComparisonData(il, ges, arac, variableName, fromCom, toCom));
+                isLoading.current = true;
               }
             }
           }
@@ -698,8 +678,12 @@ const Overview: React.FC = () => {
       // Tüm yükleme işlemlerini paralel olarak çalıştır
       if (allLoads.length > 0) {
         try {
-          await Promise.allSettled(allLoads).then(()=>{
-            console.log("✅ Tüm geçmiş veri yükleme işlemleri tamamlandı");
+          console.log(`🚀 ${allLoads.length} adet geçmiş veri yükleme işlemi başlatılıyor...`);
+          await Promise.allSettled(allLoads).then((results) => {
+            const succeeded = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
+            isLoading.current = false;
+            console.log(`✅ Geçmiş veri yükleme tamamlandı: ${succeeded} başarılı, ${failed} başarısız`);
           });
     
         } catch (error) {
@@ -942,6 +926,8 @@ const Overview: React.FC = () => {
           }
         });
         comparisonSeriesRefs.current = [];
+        // Pending request'leri temizle
+        pendingRequestsRef.current.clear();
       };
     }, []);
   // timeInterval değişikliğini dinleyen effect
@@ -1046,9 +1032,6 @@ const Overview: React.FC = () => {
     setSelectedGes(ges);
     setSelectedArac(arac);
     setSelectedVariable(variable);
-    if (il && ges && arac && variable) {
-      setMainSeriesConfig({ il, ges, arac, variable, color: "#8884d8" });
-    }
   };
 
   const handleComparisonSeriesSelect = (il: string, ges: string, arac: string, variables: string[]) => {

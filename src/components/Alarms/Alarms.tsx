@@ -39,6 +39,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
             });
             setLimits(limitsMap);
             setMeasurements(measurementsRes);
+            const differents=Object.keys(limitsMap).filter(name => !measurementsRes.some(m => m.name === name));
         } catch (err) {
             console.error("Veri çekme hatası:", err);
             setError(err instanceof Error ? err.message : "Veri çekilirken bir hata oluştu");
