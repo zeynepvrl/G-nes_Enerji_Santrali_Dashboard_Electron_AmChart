@@ -30,22 +30,46 @@ declare global {
 
 // Karşılaştırma çizgileri için renk paleti
 const COMPARISON_COLORS = [
-  "#ff6b6b", // Kırmızı
-  "#4ecdc4", // Turkuaz
-  "#45b7d1", // Mavi
-  "#96ceb4", // Yeşil
-  "#feca57", // Sarı
-  "#ff9ff3", // Pembe
-  "#54a0ff", // Mavi
-  "#5f27cd", // Mor
-  "#00d2d3", // Turkuaz
-  "#ff9f43", // Turuncu
-  "#10ac84", // Yeşil
-  "#ee5a24", 
-  "#575fcf", // Mavi-mor
-  "#0abde3", // Açık mavi
-  "#48dbfb", // Çok açık mavi
+  "#ff5733", // Koyu Kırmızı
+  "#900c3f", // Bordo
+  "#ffbd69", // Altın Sarısı
+  "#00b894", // Zeytin Yeşili
+  "#0984e3", // Canlı Mavi
+  "#6c5ce7", // Lavanta Moru
+  "#e17055", // Mercan Kırmızısı
+  "#00cec9", // Parlak Turkuaz
+  "#d63031", // Koyu Kırmızı
+  "#ffeaa7", // Açık Sarı
+  "#ff6348", // Domates Kırmızısı
+  "#00bfff", // Derin Mavi
+  "#e84393", // Şeftali Pembe
+  "#55efc4", // Mint Yeşili
+  "#f39c12", // Kehribar Sarısı
+  "#ff9f43", // Altın Turuncu
+  "#22d6b3", // Zümrüt Yeşili
+  "#8e44ad", // Mor
+  "#1abc9c", // Akdeniz Mavisi
+  "#2ecc71", // Canlı Yeşil
+  "#8e44ad", // Mor
+  "#f1c40f", // Sarı Altın
+  "#f0f0f0", // Soluk Beyaz
+  "#9b59b6", // Orkide Moru
+  "#c0392b", // Koyu Kırmızı
+  "#34495e", // Koyu Mavi-Gri
+  "#16a085", // Deniz Yeşili
+  "#1f78d1", // Koyu Mavi
+  "#f5b7b1", // Soluk Pembe
+  "#3498db", // Mavi
+  "#f6e58d", // Soluk Sarı
+  "#e84393", // Pembe
+  "#6c5ce7", // Mor
+  "#f39c12", // Turuncu Sarı
+  "#ff6f61", // Kızıl
+  "#6a5acd", // Orta Mor
+  "#ff1493", // Canlı Pembe
+  "#e74c3c", // Canlı Kırmızı
 ];
+
 
 
 const Overview: React.FC = () => {
@@ -210,7 +234,8 @@ const Overview: React.FC = () => {
           extraTooltipPrecision: 2
         })
       );
-    
+      
+      
       valueAxisRef.current = valueAxis;
   
       const valueSeries = mainPanel.series.push(
@@ -525,7 +550,7 @@ const Overview: React.FC = () => {
   
         if (chartData.length > 0 && chartRef.current) {
           const valueSeries = chartRef.current.get('stockSeries');
-    
+          
           if (valueSeries) {
             const existingData = valueSeries.data.values as CandleData[];
             const combinedData = [...chartData, ...existingData];
@@ -637,7 +662,7 @@ const Overview: React.FC = () => {
         const seriesData = valueSeries.data.values as ChartDataPoint[];
         if (seriesData.length > 0) {
           const oldestTimestamp = seriesData[0].timestamp;
-          if (dateMin - oldestTimestamp < intervalMs) {
+          if (dateMin - oldestTimestamp < 5*60*60*1000) {
             const from = new Date(oldestTimestamp - intervalMs);       
             const to = new Date(oldestTimestamp);
             
@@ -663,7 +688,7 @@ const Overview: React.FC = () => {
             if (seriesData && seriesData.length > 0) {
               const oldestTimestamp = seriesData[0].timestamp;
 
-              if (dateMin - oldestTimestamp < intervalMs) {
+              if (dateMin - oldestTimestamp < 5*60*60*1000) {
                 const fromCom = new Date(oldestTimestamp - intervalMs);       
                 const toCom = new Date(oldestTimestamp);
                 console.log("📊 Karşılaştırma serisi için geçmiş veri yükleniyor", il, ges, arac, variableName, fromCom, toCom);
@@ -758,9 +783,17 @@ const Overview: React.FC = () => {
       stroke: am5.color(selectedColor),
       tooltip: am5.Tooltip.new(rootRef.current, {
         labelText: `{name}\n[bold]{valueY}[/]`,
-        pointerOrientation: "horizontal"
+        pointerOrientation: "right",
+        getFillFromSprite: false,
+        background: am5.RoundedRectangle.new(rootRef.current, {
+          fill: am5.color(selectedColor),
+          stroke: am5.color(selectedColor),
+        }),
+        autoTextColor:true
+        
       })
     });
+
 
     // Çizgi kalınlığı ve şeffaflığını ayarla
     series.strokes.template.setAll({
@@ -1057,6 +1090,8 @@ const Overview: React.FC = () => {
     const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
     if (series) {
       series.set("stroke", am5.color(newColor));
+      series.get("tooltip")?.get("background")?.set("fill", am5.color(newColor));
+      series.get("tooltip")?.get("background")?.set("stroke", am5.color(newColor));
       // Renk state'ini güncelle
       setComparisonColors(prev => ({
         ...prev,
