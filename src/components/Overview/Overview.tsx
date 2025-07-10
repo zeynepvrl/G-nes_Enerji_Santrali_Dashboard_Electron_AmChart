@@ -7,6 +7,7 @@ import './Overview.css';
 import deviceConfigs from '../../config/deviceConfigs.json';
 import MainSeriesNestedDropdown from './mainSeriesNestedDropDown';
 import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
+import { findLineSeriesByName, findLineSeriesByPrefix, getLineSeriesCount, disposeAllLineSeries, getAllLineSeries } from '../../utils/chartHelpers';
 import {
   ChartDataPoint,
   CandleData,
@@ -99,7 +100,6 @@ const Overview: React.FC = () => {
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
   const [comparisonSelections, setComparisonSelections] = useState<Record<string, string[]>>({});
-  const comparisonSeriesRefs = useRef<am5xy.LineSeries[]>([]);
   const comparisonUnsubscribeRefs = useRef<(() => void)[]>([]);
   const prevComparisonSelections = useRef<Record<string, string[]>>({});
   // Karşılaştırma çizgilerinin renklerini saklamak için
@@ -111,8 +111,7 @@ const Overview: React.FC = () => {
   const [showSettings, setShowSettings] = useState(true);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const popupRef = useRef<HTMLDivElement>(null);
-  const [comparisonStyles, setComparisonStyles] = useState<Record<string, { width: number; style: 'solid' | 'dashed' | 'dotted' }>>({});
-
+  
   function capitalize(str: string) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -138,7 +137,6 @@ const Overview: React.FC = () => {
   }
  
   useEffect(() => {
-    console.log("1. efeect çalıştı dropdown setterlar")
     if (!window.electronAPI?.getAllGESdbsAndTheirTablesForDropdowns) return;
     window.electronAPI.getAllGESdbsAndTheirTablesForDropdowns().then((allGesdbs: any) => {
       const data: Record<string, Record<string, Record<string, VariableConfig[]>>> = {};
@@ -189,7 +187,6 @@ const Overview: React.FC = () => {
   
     // Ana effect -  grafik yalnızca ilk render oluşturuluyor müklü
   useEffect(() => {
-      console.log("3. efeect çalıştı chart oluşturma")
       const root = am5.Root.new("chartdiv");
       rootRef.current = root;  
       root.setThemes([
@@ -257,7 +254,7 @@ const Overview: React.FC = () => {
           })
         })
       );
-      stockChart.set("stockSeries", valueSeries);
+      stockChart.set("stockSeries", valueSeries);    //bu satır AmCharts'ın ana seriyi tanıması için gereklidir.
       const valueLegend = mainPanel.plotContainer.children.push(
         am5stock.StockLegend.new(root, {
           stockChart: stockChart,
@@ -601,7 +598,7 @@ const Overview: React.FC = () => {
 
         // Karşılaştırma serisini bul ve güncelle
         const seriesKey = `${il}/${ges}/${arac}-${variableName}`;
-        const comparisonSeries = comparisonSeriesRefs.current.find(s => s.get("name") === seriesKey);
+        const comparisonSeries = findLineSeriesByName(chartRef.current, seriesKey);
         
         if (comparisonSeries) {
           const existingData = comparisonSeries.data.values as ChartDataPoint[];
@@ -615,6 +612,7 @@ const Overview: React.FC = () => {
       throw error; // Hatayı yukarı fırlat
     }
   };
+
 
   // DateAxis için event listener
   useEffect(() => {
@@ -632,6 +630,7 @@ const Overview: React.FC = () => {
       if (!chart) return;
       const intervalMs = 3*60*60*1000
       // 🟠 Ana mum grafik varsa kontrol et
+      
       const valueSeries = chart.get("stockSeries");
       const dateMin = dateAxisRef.current?.getPrivate("selectionMin");
       const dateMax = dateAxisRef.current?.getPrivate("selectionMax");
@@ -645,14 +644,16 @@ const Overview: React.FC = () => {
         }
       }
 
-      comparisonSeriesRefs.current.forEach((series: any) => {
-        if (series.data.values && series.data.values.length > 0) {
+      chartRef.current?.panels.getIndex(0)?.series.each((series: any) => {
+        if (series instanceof am5xy.LineSeries) {
           const firstDataPoint = series.data.values[0] as any;
           if (firstDataPoint && firstDataPoint.timestamp) {
             allTimeStamps.push(firstDataPoint.timestamp)
           }
         }
       })
+
+
       const minTimestamp = Math.min(...allTimeStamps)
       console.log("🔄 Paralel geçmiş veri yükleme başlatılıyor");
       // Tüm yükleme işlemlerini topla
@@ -681,7 +682,7 @@ const Overview: React.FC = () => {
 
         for (const variableName of variables) {
           const seriesKey = `${il}/${ges}/${arac}-${variableName}`;
-          const comparisonSeries = comparisonSeriesRefs.current.find(s => s.get("name") === seriesKey);
+          const comparisonSeries = findLineSeriesByName(chartRef.current, seriesKey);
           
           if (comparisonSeries) {
             const seriesData = comparisonSeries.data.values as ChartDataPoint[];
@@ -770,7 +771,7 @@ const Overview: React.FC = () => {
     //console.log(`📈 Chart data created for comparison line:`, { dataPointCount: lineData?.length || 0 });
   
     // Renk seçimi - mevcut karşılaştırma serilerinin sayısına göre
-    const currentComparisonCount = comparisonSeriesRefs.current.length;
+    const currentComparisonCount = getLineSeriesCount(chartRef.current);
     const colorIndex = currentComparisonCount % COMPARISON_COLORS.length;
     const selectedColor = COMPARISON_COLORS[colorIndex];
   
@@ -803,7 +804,6 @@ const Overview: React.FC = () => {
   
     series.data.setAll(lineData);
     mainPanel.series.push(series);
-    comparisonSeriesRefs.current.push(series);
 
     // Karşılaştırma serisi eklendiğinde hasZoomedInitially'i true yap
     if (!hasZoomedInitially && lineData.length > 0) {
@@ -906,10 +906,9 @@ const Overview: React.FC = () => {
     // Kaldırılan serileri temizle
     const removedKeys = prevKeys.filter(key => !currentKeys.includes(key));
     removedKeys.forEach(key => {
-      const seriesToRemove = comparisonSeriesRefs.current.filter(s => s.get("name")?.startsWith(key));
+      const seriesToRemove = findLineSeriesByPrefix(chartRef.current, key);
       seriesToRemove.forEach(series => {
         series.dispose();
-        comparisonSeriesRefs.current = comparisonSeriesRefs.current.filter(s => s !== series);
       });       
       // MQTT aboneliklerini kaldır
       const [il, ges, arac] = key.split('/');
@@ -952,13 +951,7 @@ const Overview: React.FC = () => {
         comparisonUnsubscribeRefs.current = [];
   
         // Tüm karşılaştırma serilerini temizle
-        comparisonSeriesRefs.current.forEach(series => {
-          console.log("📡 Component unmount - Karşılaştırma serisi temizleniyor");
-          if (series && !series.isDisposed()) {
-            series.dispose();
-          }
-        });
-        comparisonSeriesRefs.current = [];
+        disposeAllLineSeries(chartRef.current);
         // Pending request'leri temizle
         pendingRequestsRef.current.clear();
       };
@@ -1087,7 +1080,7 @@ const Overview: React.FC = () => {
 
   // Karşılaştırma çizgisinin rengini değiştir
   const changeComparisonLineColor = (seriesName: string, newColor: string) => {
-    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       series.set("stroke", am5.color(newColor));
       series.get("tooltip")?.get("background")?.set("fill", am5.color(newColor));
@@ -1102,26 +1095,20 @@ const Overview: React.FC = () => {
 
   // Karşılaştırma çizgisinin stilini değiştir (kesikli, düz, noktalı)
   const changeComparisonLineStyle = (seriesName: string, style: 'solid' | 'dashed' | 'dotted') => {
-    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       const dashArray = style === 'dashed' ? [5, 5] : style === 'dotted' ? [2, 2] : undefined;
       series.strokes.template.set("strokeDasharray", dashArray);
-      setComparisonStyles(prev => ({
-        ...prev,
-        [seriesName]: { ...(prev[seriesName] || { width: 2, style: 'solid' }), style }
-      }));
+      
     }
   };
 
   // Karşılaştırma çizgisinin kalınlığını değiştir
   const changeComparisonLineWidth = (seriesName: string, width: number) => {
-    const series = comparisonSeriesRefs.current.find(s => s.get("name") === seriesName);
+    const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       series.strokes.template.set("strokeWidth", width);
-      setComparisonStyles(prev => ({
-        ...prev,
-        [seriesName]: { ...(prev[seriesName] || { width: 2, style: 'solid' }), width }
-      }));
+      
     }
   };
 
@@ -1231,7 +1218,7 @@ const Overview: React.FC = () => {
       
       <div id="chartdiv" className="chart-container">
         {/* Karşılaştırma çizgi ayarları */}
-        {comparisonSeriesRefs.current.length > 0 && showSettings && (
+        {getLineSeriesCount(chartRef.current) > 0 && showSettings && (
           <div 
             ref={popupRef}
             className={`comparison-line-settings ${isDragging ? 'dragging' : ''}`}
@@ -1252,9 +1239,11 @@ const Overview: React.FC = () => {
               </button>
             </h4>
             {/* @ts-ignore */}
-            {comparisonSeriesRefs.current
-              .filter(series => series && !series.isDisposed())
-              .map((series, index) => {
+            {(() => {
+              const allLineSeries = getAllLineSeries(chartRef.current);
+              return allLineSeries
+                .filter(series => series && !series.isDisposed())
+                .map((series, index) => {
               const seriesName = series.get("name") as string;
               const displayName = seriesName
                 .split('/')
@@ -1292,14 +1281,15 @@ const Overview: React.FC = () => {
                     onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
                     title="Çizgi kalınlığı"
                   />
-                </div>
-              );
-            })}
+                                  </div>
+                );
+              });
+            })()}
           </div>
         )}
         
         {/* Ayarları tekrar açma butonu */}
-        {comparisonSeriesRefs.current.length > 0 && !showSettings && (
+        {getLineSeriesCount(chartRef.current) > 0 && !showSettings && (
           <button
             className="settings-toggle-btn"
             style={{
