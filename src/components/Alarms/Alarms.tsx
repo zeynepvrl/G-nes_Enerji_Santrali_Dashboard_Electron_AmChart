@@ -23,16 +23,43 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     const [newLimitValue, setNewLimitValue] = useState<string>('');
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const outageAudioRef = useRef<HTMLAudioElement | null>(null);
+    
+    // Spont olmayan verilerin başlangıç zamanlarını takip etmek için
+    const [nonSpontaneousStartTimes, setNonSpontaneousStartTimes] = useState<Record<string, number>>({});
+    const gesInfoRef=useRef<Record<string,any>>({});
 
     const prevOutagesNames=useRef<Set<string>>(new Set());
    
-
     const fetchData = async () => {
         try {
             const [measurementsRes, limitsRes] = await Promise.all([
                 window.electronAPI.getMssqlTables(),
                 window.electronAPI.getLimits()
             ]);
+            
+            // Spont olmayan verilerin başlangıç zamanlarını güncelle
+            setNonSpontaneousStartTimes(prev => {
+                const newTimes = { ...prev };
+                
+                // Yeni gelen verilerde spont olanları temizle
+                measurementsRes.forEach(measurement => {
+                    if (measurement.isSpontaneous && newTimes[measurement.name]) {
+                        console.log(`🔄 ${measurement.name} tekrar spont hale geldi, başlangıç zamanı temizlendi`);
+                        delete newTimes[measurement.name];
+                    }
+                });
+                
+                // Yeni spont olmayan veriler için başlangıç zamanı ekle
+                measurementsRes.forEach(measurement => {
+                    if (!measurement.isSpontaneous && !newTimes[measurement.name]) {
+                        console.log(`⚠️ ${measurement.name} spont olmayan duruma geçti, başlangıç zamanı kaydedildi`);
+                        newTimes[measurement.name] = new Date(measurement.DATUMZEIT).getTime();
+                    }
+                });
+                
+                return newTimes;
+            });
+            
             const limitsMap: Record<string, number> = {};
             limitsRes.forEach(limit => {
                 limitsMap[limit.name] = limit.limit_value;
@@ -51,6 +78,12 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     useEffect(() => {
         fetchData();
         const interval = setInterval(fetchData, 10000);
+        const getGesInfo= async ()=>{
+            const gesInfoRes= await window.electronAPI.getGesInfo();
+            gesInfoRef.current=gesInfoRes;
+        }
+        getGesInfo();
+        console.log("gesInfoRef.current",gesInfoRef.current);
         return () => clearInterval(interval);
     }, []);
 
@@ -80,6 +113,18 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
         prevOutagesNames.current=currentNames;
     },[measurements])
 
+    // Spont olmayan verilerin süresini gerçek zamanlı güncellemek için
+    useEffect(() => {
+        if (Object.keys(nonSpontaneousStartTimes).length === 0) return;
+        
+        const interval = setInterval(() => {
+            // Sadece state'i güncellemek için boş bir setState çağrısı
+            setMeasurements(prev => [...prev]);
+        }, 1000); // Her saniye güncelle
+        
+        return () => clearInterval(interval);
+    }, [nonSpontaneousStartTimes]);
+
 
     const updateLimit = async (name: string, newLimit: number) => {
         const updated = { ...limits, [name]: newLimit };
@@ -98,6 +143,11 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
         const parts = name.split('.');
         return parts.length >= 2 ? parts[1] : name;
     };
+
+    const getGesProvince=(name:string)=>{
+        const parts=name.split('.');
+        return parts.length>=2?parts[0]:name;
+    }
 
     if (!visible) return (
         <>
@@ -169,6 +219,8 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                     const limit = limits[m.name] ?? 200;
                                     const isAlarm = m.WERT > limit;
                                     const gesName = getGesName(m.name);
+                                    const gesProvince=getGesProvince(m.name);
+                                    const gesDistrict=gesInfoRef.current.find((ges:any)=>ges.name===m.name)?.district;
                                     const isSpontaneous = m.isSpontaneous;
                                     const datum=new Date(m.DATUMZEIT);
                                     const now = Date.now();
@@ -213,15 +265,33 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                                             </button>
                                                         </span>
                                                     </div>
-                                                    {/* Spontane olmayan alarmlar için kırmızı nokta */}
-                                                    {!isSpontaneous && (
-                                                        <div className="info-table-row">
-                                                            <span className="label">Durum</span>
-                                                            <span className="value">
-                                                                <span className="manual-alarm-indicator">🔴 Veri İnvalid</span>
-                                                            </span>
-                                                        </div>
-                                                    )}
+                                                    {/* Spontane olmayan alarmlar için detaylı bilgi */}
+                                                    {!isSpontaneous && (() => {
+                                                        const durationMs = Date.now() - (nonSpontaneousStartTimes[m.name] || new Date(m.DATUMZEIT).getTime());
+                                                        const hours = Math.floor(durationMs / 3600000);
+                                                        const minutes = Math.floor((durationMs % 3600000) / 60000);
+                                                        const seconds = Math.floor((durationMs % 60000) / 1000);
+                                                        const durationText = `${hours>0?`${hours}sa `:' '}${minutes>0?`${minutes}dk `:' '}${seconds>0?`${seconds}sn `:' '}süredir`;
+                                                        
+                                                        let colorClass = 'non-spontaneous-red';
+                                                        if (durationMs < 5 * 60 * 1000) colorClass = 'non-spontaneous-yellow';
+                                                        else if (durationMs < 15 * 60 * 1000) colorClass = 'non-spontaneous-orange';
+                                                        
+                                                        return (
+                                                            <div className="info-table-row">
+                                                                <span className="label">Durum</span>
+                                                                <span className="value">
+                                                                    <span className={`manual-alarm-indicator ${colorClass}`}>
+                                                                        🔴 Veri İnvalid
+                                                                        <br />
+                                                                        <small>
+                                                                            {durationText}
+                                                                        </small>
+                                                                    </span>
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     {isDataOutage && (
                                                         <div className="info-table-row outage-status">
                                                             <span className="label">Durum</span>

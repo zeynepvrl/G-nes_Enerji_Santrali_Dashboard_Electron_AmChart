@@ -175,6 +175,20 @@ ipcMain.handle('get-limits', async () => {
   }
 });
 
+ipcMain.handle('get-ges-info', async () => {
+  if(!facilityPool){
+    console.error("❌ facility_info bağlantısı yok.");
+    return [];
+  }
+  try{
+    const result =await facilityPool.query('SELECT name, latitude, longitude, district from limits')
+    return result.rows;
+  }catch(error){
+    console.error("❌ facility_info geses sorgusu hatası:", error.message);
+    return [];
+  }
+});
+
 ipcMain.handle('update-limit', async (event, name, newLimit) => {
   if (!facilityPool) {
     console.error("⚠ facility_info bağlantısı yok.");

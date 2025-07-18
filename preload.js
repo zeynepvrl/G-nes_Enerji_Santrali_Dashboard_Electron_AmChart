@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getLimits: () => ipcRenderer.invoke('get-limits'),
   updateLimit: (name, newLimit) => ipcRenderer.invoke('update-limit', name, newLimit),
+  getGesInfo: ()=>ipcRenderer.invoke('get-ges-info'),
   getTablesHistory: (dbName, tableName, limit, startTime, endTime) => ipcRenderer.invoke('get-tables-history', dbName, tableName, limit, startTime, endTime),
   getAllGESdbsAndTheirTablesForDropdowns: () => ipcRenderer.invoke('get_all_GESdbs_and_their_tables_for_dropdowns'),
   subscribeMqtt: (topic) => ipcRenderer.invoke('subscribe-mqtt', topic),

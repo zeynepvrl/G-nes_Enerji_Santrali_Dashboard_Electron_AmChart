@@ -176,12 +176,8 @@ const Overview: React.FC = () => {
             data[il][ges][arac] = variables;
           });
         }
-        
       });
-
-      setDropdownData(data);
-      
-      
+      setDropdownData(data);    
     });
   }, []);
   

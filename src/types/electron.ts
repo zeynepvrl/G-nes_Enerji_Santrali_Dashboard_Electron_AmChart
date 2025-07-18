@@ -82,4 +82,5 @@ export interface ElectronAPI {
   getLimits: () => Promise<Limit[]>;
   updateLimit: (name: string, newLimit: number) => Promise<{ success: boolean; error?: string }>;
   logToOutage: (outages: Measurement[]) => Promise<void>;
+  getGesInfo: () => Promise<Record<string, any>>;
 } 

@@ -599,7 +599,23 @@ input[type="number"] {
 .manual-alarm-indicator {
   color: #e74c3c;
   font-weight: 600;
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+/* Sadece 15+ dakika olanlar için yanıp sönme */
+.manual-alarm-indicator.non-spontaneous-red {
   animation: manual-alarm-blink 1.5s infinite;
+}
+
+.manual-alarm-indicator small {
+  display: block;
+  margin-top: 2px;
+  font-weight: normal;
+  opacity: 0.8;
 }
 
 @keyframes manual-alarm-blink {
@@ -609,6 +625,25 @@ input[type="number"] {
   51%, 100% {
     opacity: 0.5;
   }
+}
+
+/* Spont olmayan veriler için renk kodları */
+.non-spontaneous-yellow {
+  color: #e0c982 !important;
+  background: rgba(255, 193, 7, 0.1) !important;
+  border-color: rgba(255, 193, 7, 0.3) !important;
+}
+
+.non-spontaneous-orange {
+  color: #fd7e14 !important;
+  background: rgba(253, 126, 20, 0.1) !important;
+  border-color: rgba(253, 126, 20, 0.3) !important;
+}
+
+.non-spontaneous-red {
+  color: #b81828 !important;
+  background: rgba(220, 53, 69, 0.1) !important;
+  border-color: rgba(220, 53, 69, 0.3) !important;
 }
 
 
