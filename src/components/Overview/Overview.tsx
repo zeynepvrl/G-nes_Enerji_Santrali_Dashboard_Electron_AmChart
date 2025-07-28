@@ -4,6 +4,8 @@ import * as am5xy from '@amcharts/amcharts5/xy';
 import * as am5stock from '@amcharts/amcharts5/stock';
 import am5themes_Animated from '@amcharts/amcharts5/themes/Animated';
 import './Overview.css';
+import candlestickIcon from '../../assets/candlestick-chart.png';
+import imageIcon from '../../assets/image.png';
 import deviceConfigs from '../../config/deviceConfigs.json';
 import MainSeriesNestedDropdown from './mainSeriesNestedDropDown';
 import ComparisonSeriesNestedDropdown from './comparisonSeriesNestedDropdown';
@@ -73,7 +75,7 @@ const COMPARISON_COLORS = [
 
 
 
-const Overview: React.FC = () => {
+const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   const chartRef = useRef<am5stock.StockChart | null>(null);
   const rootRef = useRef<am5.Root | null>(null);
   const dateAxisRef = useRef<am5xy.GaplessDateAxis<am5xy.AxisRenderer> | null>(null);
@@ -86,8 +88,6 @@ const Overview: React.FC = () => {
   const selectedGesRef = useRef('');
   const selectedAracRef = useRef('');
   const selectedVariableRef = useRef('');
-
-  
   const [dropdownData, setDropdownData] = useState<DropdownData>({});
   const timeIntervalRef = useRef<TimeInterval>({ timeUnit: "minute", count: 1 });
   // Veri buffer'ları için state'ler
@@ -178,6 +178,10 @@ const Overview: React.FC = () => {
         }
       });
       setDropdownData(data);    
+      setSelectedIl("diyarbakir")
+      setSelectedGes("cva12")
+      setSelectedArac("analizor1")
+      setSelectedVariable("p")
     });
   }, []);
   
@@ -343,12 +347,14 @@ const Overview: React.FC = () => {
         if (rootRef.current) {
           rootRef.current.dispose();
         }
+        console.log("rootRef.current temizlendi");
       };
   }, []);
   
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
+    
   
     let unsubscribeMqtt: (() => void) | null = null;
   
@@ -442,14 +448,13 @@ const Overview: React.FC = () => {
     };
   
     fetchAndInit();
-  
     return () => {    
       if (unsubscribeMqtt) {
         console.log("📡 MQTT UNSUBSCRIBE-----");
         unsubscribeMqtt();
       }
     };
-  }, [selectedVariable]);
+  }, [selectedIl, selectedGes, selectedArac, selectedVariable]);
   
   
   const handleMqttData = async (data: string, variableConfig: VariableConfig) => {
@@ -527,7 +532,7 @@ const Overview: React.FC = () => {
         const newData: ChartDataPoint[] = records
           .map(record => ({
             timestamp: new Date(record.timestamp).getTime(),
-            value: selectedVariable === "p" ? Math.abs(Number(record[selectedVariable])) : Number(record[selectedVariable]) // p değişkeni için pozitife çevir
+            value: selectedVariableRef.current === "p" ? Math.abs(Number(record[selectedVariableRef.current])) : Number(record[selectedVariableRef.current]) // p değişkeni için pozitife çevir
           }))
           .filter(d => !isNaN(d.value))
           .sort((a, b) => a.timestamp - b.timestamp);
@@ -1050,10 +1055,13 @@ const Overview: React.FC = () => {
   }, [timeIntervalRef.current]);
 
   const handleMainSeriesSelect = (il: string, ges: string, arac: string, variable: string) => {
+    console.log("🔍 handleMainSeriesSelect çağrıldı:", { il, ges, arac, variable });
+
     setSelectedIl(il);
     setSelectedGes(ges);
     setSelectedArac(arac);
     setSelectedVariable(variable);
+  
   };
 
   const handleComparisonSeriesSelect = (il: string, ges: string, arac: string, variables: string[]) => {
@@ -1171,12 +1179,21 @@ const Overview: React.FC = () => {
   }, [showSettings, isInitialPositionSet]);
 
 
-
+  
     return (
-    <div className="overview-container">
+    <div className={`overview-container ${!visible ? 'hidden' : ''}`}>
       <div className="chart-controls">
         <div className="control-group">
-          <label>Ana Değer Seç</label>
+          <img 
+            src={candlestickIcon} 
+            alt="Candlestick Chart" 
+            style={{ 
+              width: '24px', 
+              height: '24px', 
+              marginRight: '8px',
+              filter: 'brightness(0.7)'
+            }} 
+          />
           <MainSeriesNestedDropdown
             dropdownData={dropdownData}
             onSelect={handleMainSeriesSelect}
@@ -1187,7 +1204,16 @@ const Overview: React.FC = () => {
           />
         </div>
         <div className="control-group">
-          <label>+ Karşılaştır</label>
+          <img 
+            src={imageIcon} 
+            alt="Image" 
+            style={{ 
+              width: '24px', 
+              height: '24px', 
+              marginRight: '8px',
+              filter: 'brightness(0.7)'
+            }} 
+          />
           <ComparisonSeriesNestedDropdown
             dropdownData={dropdownData}
             onSelect={handleComparisonSeriesSelect}

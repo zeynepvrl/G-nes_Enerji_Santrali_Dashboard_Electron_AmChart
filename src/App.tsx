@@ -9,19 +9,58 @@ import './App.css';
 
 const Main = () => {
   const [activeComponent, setActiveComponent] = useState('Overview');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Component isimlerini Türkçe'ye çeviren mapping
+  const getComponentDisplayName = (componentName: string) => {
+    const nameMap: Record<string, string> = {
+      'Overview': 'Grafik',
+      'Alarms': 'İzleme',
+      'Reports': 'Raporlar',
+      'Settings': 'Ayarlar'
+    };
+    return nameMap[componentName] || componentName;
+  };
 
   return (
     <div className="app-container">
       <Navbar onNavClick={setActiveComponent} activeComponent={activeComponent} />
-      <main className="content-area">
-        <Alarms visible={activeComponent === 'Alarms'} />
+      <div className="main-wrapper">
+        {/* Top Header */}
+        <header className="main-header">
+          <div className="header-left">
+            <div className="breadcrumb">
+              <span>Ana Sayfa</span>
+              <span>/</span>
+              <span>{getComponentDisplayName(activeComponent)}</span>
+            </div>
+          </div>
+          <div className="header-right">
+            <div className="header-controls">
+              <button className="header-btn">
+                <span className="icon">🔍</span>
+              </button>
+              <button className="header-btn notification-btn">
+                <span className="icon">🔔</span>
+                <span className="badge">3</span>
+              </button>
+              <button className="header-btn">
+                <span className="icon">⚙️</span>
+              </button>
+            </div>
+          </div>
+        </header>
 
-        <div style={{ display: activeComponent !== 'Alarms' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          {activeComponent === 'Overview' && <Overview />}
-          {activeComponent === 'Reports' && <Reports />}
-          {activeComponent === 'Settings' && <Settings />}
-        </div>
-      </main>
+        {/* Main Content */}
+        <main className="main-content">
+          <div className="content-wrapper">
+            <Alarms visible={activeComponent === 'Alarms'}   />
+            <Overview visible={activeComponent === 'Overview'} />
+            {activeComponent === 'Reports' && <Reports />}
+            {activeComponent === 'Settings' && <Settings />}
+          </div>
+        </main>
+      </div>
     </div>
   );
 };

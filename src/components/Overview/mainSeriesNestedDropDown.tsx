@@ -26,11 +26,14 @@ function NestedDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null); // For closing
   const menuRef = useRef<HTMLDivElement | null>(null); // For positioning
+  const [mainDropdownSelectedIl, setMainDropdownSelectedIl] = useState<string | null>(null);
+  const [mainDropdownSelectedGes, setMainDropdownSelectedGes] = useState<string | null>(null);
+  const [mainDropdownSelectedArac, setMainDropdownSelectedArac] = useState<string | null>(null);
 
-  const ilList = Object.keys(dropdownData);
-  const gesList = selectedIl ? Object.keys(dropdownData[selectedIl] || {}) : [];
-  const aracList = (selectedIl && selectedGes) ? Object.keys(dropdownData[selectedIl]?.[selectedGes] || {}) : [];
-  const variableList = (selectedIl && selectedGes && selectedArac) ? dropdownData[selectedIl][selectedGes][selectedArac] : [];
+  const ilList = Object.keys(dropdownData || {});
+  const gesList = mainDropdownSelectedIl && dropdownData?.[mainDropdownSelectedIl] ? Object.keys(dropdownData[mainDropdownSelectedIl] || {}) : [];
+  const aracList = (mainDropdownSelectedIl && mainDropdownSelectedGes && dropdownData?.[mainDropdownSelectedIl]?.[mainDropdownSelectedGes]) ? Object.keys(dropdownData[mainDropdownSelectedIl][mainDropdownSelectedGes] || {}) : [];
+  const variableList = (mainDropdownSelectedIl && mainDropdownSelectedGes && mainDropdownSelectedArac && dropdownData?.[mainDropdownSelectedIl]?.[mainDropdownSelectedGes]?.[mainDropdownSelectedArac]) ? dropdownData[mainDropdownSelectedIl][mainDropdownSelectedGes][mainDropdownSelectedArac] : [];
   
   const getSubmenuPosition = (triggerRef: HTMLLIElement | null) => {
     if (!menuRef.current || !triggerRef) return {};
@@ -56,9 +59,9 @@ function NestedDropdown({
   }, []);
 
   const getDropdownLabel = () => {
-    if (selectedVariable) return `${selectedIl} / ${selectedGes} / ${selectedArac} / ${selectedVariable}`;
-    if (selectedArac) return `${selectedIl} / ${selectedGes} / ${selectedArac}`;
-    if (selectedGes) return `${selectedIl} / ${selectedGes}`;
+    if (selectedVariable && selectedIl && selectedGes && selectedArac) return `${selectedIl} / ${selectedGes} / ${selectedArac} / ${selectedVariable}`;
+    if (selectedArac && selectedIl && selectedGes) return `${selectedIl} / ${selectedGes} / ${selectedArac}`;
+    if (selectedGes && selectedIl) return `${selectedIl} / ${selectedGes}`;
     if (selectedIl) return selectedIl;
     return "Ana değer seçin";
   };
@@ -76,8 +79,8 @@ function NestedDropdown({
               <li
                 key={il}
                 ref={el => (ilRefs.current[i] = el)}
-                className={selectedIl === il ? 'selected' : ''}
-                onMouseEnter={() => onSelect(il, "", "", "")}
+                className={mainDropdownSelectedIl === il ? 'selected' : ''}
+                onMouseEnter={() => setMainDropdownSelectedIl(il)}
               >
                 <span className="submenu-label">{il}</span>
                 <span className="submenu-arrow">▶</span>
@@ -86,14 +89,14 @@ function NestedDropdown({
           </ul>
 
           {/* Level 2: GES */}
-          {selectedIl && gesList.length > 0 && (
-            <ul className="submenu-list" style={{ ...getSubmenuPosition(ilRefs.current[ilList.indexOf(selectedIl)]), left: '100%' }}>
+          {mainDropdownSelectedIl && gesList.length > 0 && (
+            <ul className="submenu-list" style={{ ...getSubmenuPosition(ilRefs.current[ilList.indexOf(mainDropdownSelectedIl)]), left: '100%' }}>
               {gesList.map((ges, i) => (
                 <li
-                  key={`${selectedIl}-${ges}`}
+                  key={`${mainDropdownSelectedIl}-${ges}`}
                   ref={el => (gesRefs.current[i] = el)}
-                  className={selectedGes === ges ? 'selected' : ''}
-                  onMouseEnter={() => onSelect(selectedIl, ges, "", "")}
+                  className={mainDropdownSelectedGes === ges ? 'selected' : ''}
+                  onMouseEnter={() => setMainDropdownSelectedGes(ges)}
                 >
                   <span className="submenu-label">{ges}</span>
                   <span className="submenu-arrow">▶</span>
@@ -103,14 +106,14 @@ function NestedDropdown({
           )}
 
           {/* Level 3: Araç */}
-          {selectedGes && aracList.length > 0 && (
-             <ul className="submenu-list" style={{ ...getSubmenuPosition(gesRefs.current[gesList.indexOf(selectedGes)]), left: '200%' }}>
+          {mainDropdownSelectedGes && aracList.length > 0 && (
+             <ul className="submenu-list" style={{ ...getSubmenuPosition(gesRefs.current[gesList.indexOf(mainDropdownSelectedGes)]), left: '200%' }}>
               {aracList.map((arac, i) => (
                 <li
-                  key={`${selectedIl}-${selectedGes}-${arac}`}
+                  key={`${mainDropdownSelectedIl}-${mainDropdownSelectedGes}-${arac}`}
                   ref={el => (aracRefs.current[i] = el)}
-                  className={selectedArac === arac ? 'selected' : ''}
-                  onMouseEnter={() => onSelect(selectedIl, selectedGes, arac, "")}
+                  className={ mainDropdownSelectedArac === arac ? 'selected' : ''}
+                  onMouseEnter={() => setMainDropdownSelectedArac(arac)}
                 >
                   <span className="submenu-label">{arac}</span>
                   <span className="submenu-arrow">▶</span>
@@ -120,14 +123,14 @@ function NestedDropdown({
           )}
           
           {/* Level 4: Değişken */}
-          {selectedArac && variableList.length > 0 && (
-            <ul className="submenu-list" style={{ ...getSubmenuPosition(aracRefs.current[aracList.indexOf(selectedArac)]), left: '300%' }}>
+          {mainDropdownSelectedArac && variableList.length > 0 && (
+            <ul className="submenu-list" style={{ ...getSubmenuPosition(aracRefs.current[aracList.indexOf(mainDropdownSelectedArac)]), left: '293%' }}>
               {variableList.map(variable => (
                 <li
-                  key={`${selectedIl}-${selectedGes}-${selectedArac}-${variable.name}`}
-                  className={selectedVariable === variable.name ? 'selected' : ''}
+                  key={`${mainDropdownSelectedIl}-${mainDropdownSelectedGes}-${mainDropdownSelectedArac}-${variable.name}`}
+                  className={ selectedVariable === variable.name ? 'selected' : ''}
                   onClick={() => {
-                    onSelect(selectedIl, selectedGes, selectedArac, variable.name);
+                    onSelect(mainDropdownSelectedIl!, mainDropdownSelectedGes!, mainDropdownSelectedArac!, variable.name);       //ana değer dropdown unda yalnızca variable seçildiğinde overview deki handleMainSeriesSelect tetiklenecek ve 4 değer de set edilip güncellenecek, aksi drumda her il ges arac haeketinde variable "" atanacaktı ve bu da kullanıcı deneyimini kötü etkileyecekti, variable boş atandığı için 
                     setIsOpen(false);
                   }}
                 >

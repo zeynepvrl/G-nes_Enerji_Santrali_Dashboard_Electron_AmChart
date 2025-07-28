@@ -26,8 +26,11 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     
     // Spont olmayan verilerin başlangıç zamanlarını takip etmek için
     const [nonSpontaneousStartTimes, setNonSpontaneousStartTimes] = useState<Record<string, number>>({});
-    const gesInfoRef=useRef<Record<string,any>>({});
-
+        const gesInfoRef=useRef<Record<string,any>>({});
+    
+    // Gruplandırılmış veriler için state
+    const [groupedMeasurements, setGroupedMeasurements] = useState<Record<string, Measurement[]>>({});
+    
     const prevOutagesNames=useRef<Set<string>>(new Set());
    
     const fetchData = async () => {
@@ -44,7 +47,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                 // Yeni gelen verilerde spont olanları temizle
                 measurementsRes.forEach(measurement => {
                     if (measurement.isSpontaneous && newTimes[measurement.name]) {
-                        console.log(`🔄 ${measurement.name} tekrar spont hale geldi, başlangıç zamanı temizlendi`);
+                        //console.log(`🔄 ${measurement.name} tekrar spont hale geldi, başlangıç zamanı temizlendi`);
                         delete newTimes[measurement.name];
                     }
                 });
@@ -52,7 +55,7 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                 // Yeni spont olmayan veriler için başlangıç zamanı ekle
                 measurementsRes.forEach(measurement => {
                     if (!measurement.isSpontaneous && !newTimes[measurement.name]) {
-                        console.log(`⚠️ ${measurement.name} spont olmayan duruma geçti, başlangıç zamanı kaydedildi`);
+                        //console.log(`⚠️ ${measurement.name} spont olmayan duruma geçti, başlangıç zamanı kaydedildi`);
                         newTimes[measurement.name] = new Date(measurement.DATUMZEIT).getTime();
                     }
                 });
@@ -66,6 +69,11 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
             });
             setLimits(limitsMap);
             setMeasurements(measurementsRes);
+            
+            // Gruplandırılmış verileri güncelle
+            const grouped = getGroupedMeasurements(measurementsRes);
+            setGroupedMeasurements(grouped);
+            
             const differents=Object.keys(limitsMap).filter(name => !measurementsRes.some(m => m.name === name));
         } catch (err) {
             console.error("Veri çekme hatası:", err);
@@ -81,10 +89,21 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
         const getGesInfo= async ()=>{
             const gesInfoRes= await window.electronAPI.getGesInfo();
             gesInfoRef.current=gesInfoRes;
+            //console.log("🏢 GES Info yüklendi:", gesInfoRes);
+            //console.log("🏢 İlk GES örneği:", gesInfoRes[0]);
+            
+            // GES bilgileri değiştiğinde gruplandırmayı yenile
+            if (measurements.length > 0) {
+                const grouped = getGroupedMeasurements(measurements);
+                setGroupedMeasurements(grouped);
+            }
         }
         getGesInfo();
-        console.log("gesInfoRef.current",gesInfoRef.current);
-        return () => clearInterval(interval);
+        //console.log("gesInfoRef.current",gesInfoRef.current);
+        return () => {
+            console.log("interval temizlendi");
+            clearInterval(interval);
+        }
     }, []);
 
     useEffect(() => {
@@ -144,10 +163,63 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
         return parts.length >= 2 ? parts[1] : name;
     };
 
-    const getGesProvince=(name:string)=>{
-        const parts=name.split('.');
-        return parts.length>=2?parts[0]:name;
-    }
+    // Performanslı gruplandırma fonksiyonu - sadece gerektiğinde çalışır
+    const getGroupedMeasurements = (measurements: Measurement[]) => {
+        //console.log("🔍 Gruplandırma başladı");
+        //console.log("📊 Measurements sayısı:", measurements.length);
+        //console.log("🏢 GES Info sayısı:", gesInfoRef.current.length);
+        
+        // Yeni gruplandırma yap
+        const grouped: Record<string, Measurement[]> = {};
+        
+        measurements.forEach(measurement => {
+            const parts = measurement.name.split('.');
+            const ilName = parts[0];
+            const gesName = parts[1];
+            const fullGesName = `${ilName}.${gesName}`;
+            
+            // gesInfoRef.current'ta bu GES'i ara
+            const gesInfo = gesInfoRef.current.find((ges: any) => 
+                ges.name && (ges.name.includes(fullGesName))
+            );
+            
+            const district = gesInfo?.district;
+            // İl bilgisini measurement adından çıkar
+            const province = ilName; // parts[0] zaten il adı
+            
+            if (district && province) {
+                const groupKey = `${province} - ${district}`;
+                
+                if (!grouped[groupKey]) {
+                    grouped[groupKey] = [];
+                }
+                grouped[groupKey].push(measurement);
+            }
+        });
+        
+        //console.log("📋 Oluşturulan gruplar:", Object.keys(grouped));
+        
+        // Her grup içinde alfabetik sırala
+        Object.keys(grouped).forEach(groupKey => {
+            grouped[groupKey].sort((a, b) => {
+                const gesNameA = getGesName(a.name);
+                const gesNameB = getGesName(b.name);
+                return gesNameA.localeCompare(gesNameB, 'tr');
+            });
+        });
+        
+        // Grupları il ve ilçe adına göre alfabetik sırala
+        const sortedGrouped: Record<string, Measurement[]> = {};
+        const sortedKeys = Object.keys(grouped).sort((a, b) => {
+            return a.localeCompare(b, 'tr');
+        });
+        
+        sortedKeys.forEach(key => {
+            sortedGrouped[key] = grouped[key];
+        });
+        
+        return sortedGrouped;
+    };
 
     if (!visible) return (
         <>
@@ -209,22 +281,31 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                             </div>
                         </h2>
                         <div className="alarms-grid">
-                            {measurements
-                                .sort((a, b) => {
-                                    const gesNameA = getGesName(a.name);
-                                    const gesNameB = getGesName(b.name);
-                                    return gesNameA.localeCompare(gesNameB, 'tr');
-                                })
-                                .map((m, index) => {
-                                    const limit = limits[m.name] ?? 200;
-                                    const isAlarm = m.WERT > limit;
-                                    const gesName = getGesName(m.name);
-                                    const gesProvince=getGesProvince(m.name);
-                                    const gesDistrict=gesInfoRef.current.find((ges:any)=>ges.name===m.name)?.district;
-                                    const isSpontaneous = m.isSpontaneous;
+
+                            {Object.keys(groupedMeasurements).length > 0 ? (
+                                // Gruplandırılmış görünüm
+                                Object.entries(groupedMeasurements).map(([groupKey, groupMeasurements]) => (
+                                    <div key={groupKey} className="district-group">
+                                        <h3 className="district-title">
+                                            {groupKey}
+                                            <span style={{ 
+                                                fontSize: '0.9rem', 
+                                                opacity: 0.9, 
+                                                marginLeft: '10px',
+                                                fontWeight: '400'
+                                            }}>
+                                                ({groupMeasurements.length} GES)
+                                            </span>
+                                        </h3>
+                                        <div className="district-measurements">
+                                            {groupMeasurements.map((m, index) => {
+                                                const limit = limits[m.name] ?? 200;
+                                                const isAlarm = m.WERT > limit;
+                                                const gesName = getGesName(m.name);
+                                                const isSpontaneous = m.isSpontaneous;
                                     const datum=new Date(m.DATUMZEIT);
                                     const now = Date.now();
-                                    const isDataLate =(now-datum.getTime()) > 2*60*1000;
+                                    const isDataLate =(now-datum.getTime()) > 4*60*1000;
                                     const isDataOutage = m.isOutage;
                       
                                     return (
@@ -232,10 +313,25 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                             key={m.name}
                                             className={`measurement-list-item${isAlarm ? ' alarm-blink' : isDataOutage ? ' data-outage-blink' : isDataLate ? ' data-late' : ''}`}
                                         >
+
                                             <div className="measurement-row">
-                                                <div className={`ges-title${isDataOutage ? ' outage-title' : ''}`}>
+                                                <div className={`ges-title${isDataOutage ? ' outage-title' : ''}${!isSpontaneous ? ' invalid-title' : ''}`}>
                                                     {gesName}
-                                                    {isDataOutage && <span className="outage-indicator">⚡ KESİNTİ</span>}
+                                                    {isDataOutage && <span className="outage-indicator">⚡</span>}
+                                                    {!isSpontaneous && (
+                                                        <>
+                                                            <span className="invalid-indicator">🔴</span>
+                                                            <span className="invalid-duration-small">
+                                                                {(() => {
+                                                                    const durationMs = Date.now() - (nonSpontaneousStartTimes[m.name] || new Date(m.DATUMZEIT).getTime());
+                                                                    const hours = Math.floor(durationMs / 3600000);
+                                                                    const minutes = Math.floor((durationMs % 3600000) / 60000);
+                                                                    const seconds = Math.floor((durationMs % 60000) / 1000);
+                                                                    return `${hours>0?`${hours}sa`:' '}${minutes>0?`${minutes}dk`:' '}${seconds>0?`${seconds}sn`:' '}`;
+                                                                })()}
+                                                            </span>
+                                                        </>
+                                                    )}
                                                 </div>
                                                 <div className="info-table">
                                                     <div className="info-table-row">
@@ -265,41 +361,8 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                                             </button>
                                                         </span>
                                                     </div>
-                                                    {/* Spontane olmayan alarmlar için detaylı bilgi */}
-                                                    {!isSpontaneous && (() => {
-                                                        const durationMs = Date.now() - (nonSpontaneousStartTimes[m.name] || new Date(m.DATUMZEIT).getTime());
-                                                        const hours = Math.floor(durationMs / 3600000);
-                                                        const minutes = Math.floor((durationMs % 3600000) / 60000);
-                                                        const seconds = Math.floor((durationMs % 60000) / 1000);
-                                                        const durationText = `${hours>0?`${hours}sa `:' '}${minutes>0?`${minutes}dk `:' '}${seconds>0?`${seconds}sn `:' '}süredir`;
-                                                        
-                                                        let colorClass = 'non-spontaneous-red';
-                                                        if (durationMs < 5 * 60 * 1000) colorClass = 'non-spontaneous-yellow';
-                                                        else if (durationMs < 15 * 60 * 1000) colorClass = 'non-spontaneous-orange';
-                                                        
-                                                        return (
-                                                            <div className="info-table-row">
-                                                                <span className="label">Durum</span>
-                                                                <span className="value">
-                                                                    <span className={`manual-alarm-indicator ${colorClass}`}>
-                                                                        🔴 Veri İnvalid
-                                                                        <br />
-                                                                        <small>
-                                                                            {durationText}
-                                                                        </small>
-                                                                    </span>
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })()}
-                                                    {isDataOutage && (
-                                                        <div className="info-table-row outage-status">
-                                                            <span className="label">Durum</span>
-                                                            <span className="value">
-                                                                <span className="outage-status-indicator">⚡ Elektrik Kesintisi</span>
-                                                            </span>
-                                                        </div>
-                                                    )}
+                                                    
+
                                                     {editingGES === m.name && (
                                                         <div className="edit-row">
                                                             <input
@@ -336,6 +399,12 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                         </div>
                                     );
                                 })}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="loading">GES bilgileri yükleniyor...</div>
+                            )}
                         </div>
                     </div>
                 )}
