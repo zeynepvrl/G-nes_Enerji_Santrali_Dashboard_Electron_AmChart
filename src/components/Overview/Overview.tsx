@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState,useCallback } from 'react';
+import React, { useEffect, useRef, useState,useCallback, useMemo } from 'react';
 import * as am5 from '@amcharts/amcharts5';
 import * as am5xy from '@amcharts/amcharts5/xy';
 import * as am5stock from '@amcharts/amcharts5/stock';
@@ -100,7 +100,7 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   const [selectedComparisonGes, setSelectedComparisonGes] = useState('');
   const [selectedComparisonArac, setSelectedComparisonArac] = useState('');
   const [comparisonSelections, setComparisonSelections] = useState<Record<string, string[]>>({});
-  const comparisonUnsubscribeRefs = useRef<(() => void)[]>([]);
+  const comparisonUnsubscribeRefs = useRef<Map<string, () => void>>(new Map());
   const prevComparisonSelections = useRef<Record<string, string[]>>({});
   // Karşılaştırma çizgilerinin renklerini saklamak için
   const [comparisonColors, setComparisonColors] = useState<Record<string, string>>({});
@@ -354,8 +354,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   // Variable seçilince mqtt ye bağlar canlı veri için ve geçmiş 20 saatlik verisini alır setDataBuffer
   useEffect(() => {
     if (!selectedIl || !selectedGes || !selectedArac || !selectedVariable) return;
-    
-  
     let unsubscribeMqtt: (() => void) | null = null;
   
     const fetchAndInit = async () => {
@@ -895,7 +893,9 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     });
   
     if (typeof unsubscribe === "function") {
-      comparisonUnsubscribeRefs.current.push(unsubscribe);
+      const seriesKey = `${key}-${variableName}`;
+      comparisonUnsubscribeRefs.current.set(seriesKey, unsubscribe);
+      console.log(`📡 MQTT unsubscribe fonksiyonu kaydedildi: ${seriesKey}`);
     }
   };
   // Karşılaştırma serilerini yönetmek için useEffect
@@ -911,17 +911,18 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
       seriesToRemove.forEach(series => {
         series.dispose();
       });       
-      // MQTT aboneliklerini kaldır
-      const [il, ges, arac] = key.split('/');
-      const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
-      const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
-      const cihazGrubu = getCihazGrubu(arac);
-      if (cihazGrubu) {
-        const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
-        console.log(`📡 Kaldırılan seri için MQTT UNSUBSCRIBE: ${topic}`);
-        window.electronAPI.unsubscribeMqtt(topic);
-      }
       
+      // MQTT aboneliklerini kaldır - Map yapısını kullan
+      const variables = prevComparisonSelections.current[key] || [];
+      variables.forEach(variableName => {
+        const seriesKey = `${key}-${variableName}`;
+        const unsubscribeFn = comparisonUnsubscribeRefs.current.get(seriesKey);
+        if (unsubscribeFn) {
+          unsubscribeFn();
+          comparisonUnsubscribeRefs.current.delete(seriesKey);
+          console.log(`📡 Kaldırılan seri için MQTT UNSUBSCRIBE: ${seriesKey}`);
+        }
+      });
     });
 
     // **YENİ EKLENEN** serileri işle
@@ -949,7 +950,7 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
             unsubscribe();
           }
         });
-        comparisonUnsubscribeRefs.current = [];
+        comparisonUnsubscribeRefs.current = new Map();
   
         // Tüm karşılaştırma serilerini temizle
         disposeAllLineSeries(chartRef.current);
@@ -1055,13 +1056,10 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   }, [timeIntervalRef.current]);
 
   const handleMainSeriesSelect = (il: string, ges: string, arac: string, variable: string) => {
-    console.log("🔍 handleMainSeriesSelect çağrıldı:", { il, ges, arac, variable });
-
     setSelectedIl(il);
     setSelectedGes(ges);
     setSelectedArac(arac);
     setSelectedVariable(variable);
-  
   };
 
   const handleComparisonSeriesSelect = (il: string, ges: string, arac: string, variables: string[]) => {
@@ -1114,6 +1112,48 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
       series.strokes.template.set("strokeWidth", width);
       
     }
+  };
+
+  // Karşılaştırma çizgisini kaldır
+  const removeComparisonLine = (seriesName: string) => {
+    console.log(`🗑️ Removing comparison line: ${seriesName}`);
+    
+    // Seriyi grafikten kaldır
+    const series = findLineSeriesByName(chartRef.current, seriesName);
+    if (series) {
+      series.dispose();
+      console.log(`📊 Series disposed: ${seriesName}`);
+    }
+    
+    // MQTT unsubscribe işlemini yap
+    const unsubscribeFn = comparisonUnsubscribeRefs.current.get(seriesName);
+    if (unsubscribeFn) {
+      unsubscribeFn();
+      comparisonUnsubscribeRefs.current.delete(seriesName);
+      console.log(`📡 MQTT unsubscribe completed: ${seriesName}`);
+    }
+    
+    // comparisonSelections state'ini güncelle
+    const [key, variableName] = seriesName.split('-');
+    if (key && variableName) {
+      setComparisonSelections(prev => {
+        const updated = { ...prev };
+        if (updated[key]) {
+          updated[key] = updated[key].filter(v => v !== variableName);
+          if (updated[key].length === 0) {
+            delete updated[key];
+          }
+        }
+        return updated;
+      });
+    }
+    
+    // Renk state'inden de kaldır
+    setComparisonColors(prev => {
+      const updated = { ...prev };
+      delete updated[seriesName];
+      return updated;
+    });
   };
 
   // Popup sürükleme işlevselliği
@@ -1178,8 +1218,56 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     }
   }, [showSettings, isInitialPositionSet]);
 
+  // Karşılaştırma çizgi ayarları listesini oluştur
+  const comparisonLineSettings = useMemo(() => {
+    const allLineSeries = getAllLineSeries(chartRef.current);
+    return allLineSeries
+      .filter(series => series && !series.isDisposed())
+      .map((series, index) => {
+        const seriesName = series.get("name") as string;   
+        const currentColor = comparisonColors[seriesName] || COMPARISON_COLORS[index % COMPARISON_COLORS.length];
+        
+        return (
+          <div key={seriesName} className="comparison-line-item">
+            <label title={seriesName}>{seriesName}</label>
+            <input
+              type="color"
+              className="color-picker"
+              value={currentColor}
+              onChange={(e) => changeComparisonLineColor(seriesName, e.target.value)}
+              title="Renk seç"
+            />
+            <select
+              className="line-style-select"
+              defaultValue={series.strokes.template.get("strokeDasharray") ? "dashed" : "solid"}
+              onChange={(e) => changeComparisonLineStyle(seriesName, e.target.value as 'solid' | 'dashed' | 'dotted')}
+              title="Çizgi stili"
+            >
+              <option value="solid">Düz</option>
+              <option value="dashed">Kesikli</option>
+              <option value="dotted">Noktalı</option>
+            </select>
+            <input
+              type="number"
+              className="line-width-input"
+              min="1"
+              max="10"
+              defaultValue={series.strokes.template.get("strokeWidth")}
+              onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
+              title="Çizgi kalınlığı"
+            />
+            <button
+              className="remove-series-btn"
+              onClick={() => removeComparisonLine(seriesName)}
+              title="Seriyi kaldır"
+            >
+              ×
+            </button>
+          </div>
+        );
+      });
+  }, [comparisonColors, changeComparisonLineColor, changeComparisonLineStyle, changeComparisonLineWidth, removeComparisonLine]);
 
-  
     return (
     <div className={`overview-container ${!visible ? 'hidden' : ''}`}>
       <div className="chart-controls">
@@ -1260,53 +1348,7 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
                 ×
               </button>
             </h4>
-            {/* @ts-ignore */}
-            {(() => {
-              const allLineSeries = getAllLineSeries(chartRef.current);
-              return allLineSeries
-                .filter(series => series && !series.isDisposed())
-                .map((series, index) => {
-              const seriesName = series.get("name") as string;
-              const displayName = seriesName
-                .split('/')
-                .pop()
-                ?.replace(/-/g, ' ') || seriesName;
-              
-              const currentColor = comparisonColors[seriesName] || COMPARISON_COLORS[index % COMPARISON_COLORS.length];
-              
-              return (
-                <div key={seriesName} className="comparison-line-item">
-                  <label title={seriesName}>{displayName}</label>
-                  <input
-                    type="color"
-                    className="color-picker"
-                    value={currentColor}
-                    onChange={(e) => changeComparisonLineColor(seriesName, e.target.value)}
-                    title="Renk seç"
-                  />
-                  <select
-                    className="line-style-select"
-                    defaultValue={series.strokes.template.get("strokeDasharray") ? "dashed" : "solid"}
-                    onChange={(e) => changeComparisonLineStyle(seriesName, e.target.value as 'solid' | 'dashed' | 'dotted')}
-                    title="Çizgi stili"
-                  >
-                    <option value="solid">Düz</option>
-                    <option value="dashed">Kesikli</option>
-                    <option value="dotted">Noktalı</option>
-                  </select>
-                  <input
-                    type="number"
-                    className="line-width-input"
-                    min="1"
-                    max="10"
-                    defaultValue={series.strokes.template.get("strokeWidth")}
-                    onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
-                    title="Çizgi kalınlığı"
-                  />
-                                  </div>
-                );
-              });
-            })()}
+            {comparisonLineSettings}
           </div>
         )}
         
@@ -1325,6 +1367,8 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
             ⚙️
           </button>
         )}
+
+
       </div>
     </div>
   );

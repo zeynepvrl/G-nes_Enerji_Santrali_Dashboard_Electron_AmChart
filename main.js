@@ -291,7 +291,7 @@ ipcMain.handle('unsubscribe-mqtt', async (event, topic) => {
   });
 });
 
-let globalPool; // 🌐 Bağlantı havuzu
+let globalPool; 
 
 async function initSqlConnection() {
   if (!globalPool) {
@@ -344,8 +344,6 @@ app.on('window-all-closed', async () => {
     app.quit()
   }
 })
-
-
 
 // MSSQL tabloları için handler - Worker kullanarak
 ipcMain.handle('get-mssql-tables', async () => {
