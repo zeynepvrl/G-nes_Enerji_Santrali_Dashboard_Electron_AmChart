@@ -14,8 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAllGESdbsAndTheirTablesForDropdowns: () => ipcRenderer.invoke('get_all_GESdbs_and_their_tables_for_dropdowns'),
   subscribeMqtt: (topic) => ipcRenderer.invoke('subscribe-mqtt', topic),
   getMssqlTables: () => ipcRenderer.invoke('get-mssql-tables'),
-  unsubscribeMqtt: (topic) => ipcRenderer.invoke('unsubscribe-mqtt', topic),
-  
+
   // Yeni worker-based API'ler
   processMqttData: (rawData, variableConfig) => ipcRenderer.invoke('process-mqtt-data', rawData, variableConfig),
   getChartData: (data) => ipcRenderer.invoke('get-chart-data', data),

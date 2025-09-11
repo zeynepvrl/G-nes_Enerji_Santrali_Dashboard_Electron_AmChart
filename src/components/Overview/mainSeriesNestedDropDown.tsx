@@ -29,6 +29,7 @@ function NestedDropdown({
   const [mainDropdownSelectedIl, setMainDropdownSelectedIl] = useState<string | null>(null);
   const [mainDropdownSelectedGes, setMainDropdownSelectedGes] = useState<string | null>(null);
   const [mainDropdownSelectedArac, setMainDropdownSelectedArac] = useState<string | null>(null);
+  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const ilList = Object.keys(dropdownData || {});
   const gesList = mainDropdownSelectedIl && dropdownData?.[mainDropdownSelectedIl] ? Object.keys(dropdownData[mainDropdownSelectedIl] || {}) : [];
@@ -48,14 +49,43 @@ function NestedDropdown({
   const gesRefs = useRef<(HTMLLIElement | null)[]>([]);
   const aracRefs = useRef<(HTMLLIElement | null)[]>([]);
 
+  // Mouse uzaklaştığında dropdown'ı kapatma fonksiyonu
+  const handleMouseLeave = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+    }
+    closeTimeoutRef.current = setTimeout(() => {
+      setIsOpen(false);
+      setMainDropdownSelectedIl(null);
+      setMainDropdownSelectedGes(null);
+      setMainDropdownSelectedArac(null);
+    }, 400); // 300ms gecikme
+  };
+
+  // Mouse dropdown'a geri döndüğünde timeout'u iptal et
+  const handleMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
+        setMainDropdownSelectedIl(null);
+        setMainDropdownSelectedGes(null);
+        setMainDropdownSelectedArac(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+    };
   }, []);
 
   const getDropdownLabel = () => {
@@ -72,7 +102,12 @@ function NestedDropdown({
         {getDropdownLabel()}
       </button>
       {isOpen && (
-        <div className="dropdown-menu" ref={menuRef}>
+        <div 
+          className="dropdown-menu" 
+          ref={menuRef}
+          onMouseLeave={handleMouseLeave}
+          onMouseEnter={handleMouseEnter}
+        >
           {/* Level 1: İl */}
           <ul className="submenu-list">
             {ilList.map((il, i) => (

@@ -1,5 +1,6 @@
 import React from 'react';
 import './Navbar.css';
+import logo from '../../assets/ChatGPT Image 30 Tem 2025 17_43_47.png';
 
 interface NavbarProps {
   onNavClick: (componentName: string) => void;
@@ -55,6 +56,7 @@ const Navbar: React.FC<NavbarProps> = ({ onNavClick, activeComponent }) => {
   return (
     <nav className="navbar">
       <div className="navbar-brand">
+        {/*<img className="navbar-logo" src={logo} alt="DBE ENERJİ LOGO" />*/}
         <h1>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>

@@ -275,22 +275,6 @@ ipcMain.handle('subscribe-mqtt', async (event, topic) => {
   });
 });
 
-ipcMain.handle('unsubscribe-mqtt', async (event, topic) => {
-  if (!mqttClient || !subscribedTopics.has(topic)) return;
-  return new Promise((resolve, reject) => {
-    mqttClient.unsubscribe(topic, (err) => {
-      if (err) {
-        console.error('MQTT unsubscribe error:', err);
-        reject(err);
-        return;
-      }
-      subscribedTopics.delete(topic);
-      console.log('MQTT unsubscribed:', topic);
-      resolve();
-    });
-  });
-});
-
 let globalPool; 
 
 async function initSqlConnection() {

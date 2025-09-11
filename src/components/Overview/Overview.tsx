@@ -104,6 +104,9 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   const prevComparisonSelections = useRef<Record<string, string[]>>({});
   // Karşılaştırma çizgilerinin renklerini saklamak için
   const [comparisonColors, setComparisonColors] = useState<Record<string, string>>({});
+  // Karşılaştırma serileri yüklenirken loading state'i
+  const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+
   // Popup pozisyonu için state
   const [popupPosition, setPopupPosition] = useState({ x: 10, y: 10 });
   const [isInitialPositionSet, setIsInitialPositionSet] = useState(false);
@@ -111,6 +114,56 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   const [showSettings, setShowSettings] = useState(true);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const popupRef = useRef<HTMLDivElement>(null);
+  
+  // Bildirim sistemi için state'ler
+  const [notifications, setNotifications] = useState<Array<{
+    id: string;
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    timestamp: number;
+  }>>([]);
+  
+  // Bildirim gösterme fonksiyonu
+  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    // Benzersiz ID oluştur - timestamp + random sayı
+    const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newNotification = {
+      id,
+      message,
+      type,
+      timestamp: Date.now()
+    };
+    
+    setNotifications(prev => [...prev, newNotification]);
+    
+    // Bildirim türüne göre farklı süreler
+    let timeoutDuration = 5000; // Varsayılan 5 saniye
+    
+    switch (type) {
+      case 'success':
+        timeoutDuration = 3000; // Başarı bildirimleri 3 saniye
+        break;
+      case 'error':
+        timeoutDuration = 8000; // Hata bildirimleri 8 saniye
+        break;
+      case 'warning':
+        timeoutDuration = 6000; // Uyarı bildirimleri 6 saniye
+        break;
+      case 'info':
+        timeoutDuration = 5000; // Bilgi bildirimleri 5 saniye
+        break;
+    }
+    
+    // Belirlenen süre sonra bildirimi otomatik kaldır
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(notification => notification.id !== id));
+    }, timeoutDuration);
+  }, []);
+  
+  // Bildirimi manuel kaldırma fonksiyonu
+  const removeNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.filter(notification => notification.id !== id));
+  }, []);
   
   function capitalize(str: string) {
     if (!str) return '';
@@ -404,17 +457,14 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
                   const beforeMax = axis.getPrivate("selectionMax");
   
                   axis.zoomToDates(new Date(start), new Date(end));
-                  console.log("🔍 Initial zoom başlatıldı...");
-  
+
                   setTimeout(() => {
                     const afterMin = axis.getPrivate("selectionMin");
                     const afterMax = axis.getPrivate("selectionMax");
   
                     if (afterMin !== beforeMin || afterMax !== beforeMax) {
-                      console.log("✅ Zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
                       setHasZoomedInitially(true);
                     } else {
-                      console.log("⚠️ Zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
                     }
                   }, 2000);
                 }
@@ -430,7 +480,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
           const cihazGrubu = getCihazGrubu(selectedArac);
           if (cihazGrubu) {
             const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${selectedArac}`;
-            console.log("📡 MQTT SUBSCRIBE:", topic);
             window.electronAPI.subscribeMqtt(topic);
   
             unsubscribeMqtt = window.electronAPI.onMqttData((data, incomingTopic) => {
@@ -448,7 +497,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     fetchAndInit();
     return () => {    
       if (unsubscribeMqtt) {
-        console.log("📡 MQTT UNSUBSCRIBE-----");
         unsubscribeMqtt();
       }
     };
@@ -513,17 +561,15 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   // Geçmiş veri yükleme fonksiyonu
   const loadHistoricalCandlestickData = async (startTime: Date, endTime: Date ) => {
     if (!selectedIlRef.current || !selectedGesRef.current || !selectedAracRef.current || !selectedVariableRef.current || isLoadingHistoricalDataRef.current){ 
-      console.log("sorun burda mi 590")
+  
       return;
     }
     isLoadingHistoricalDataRef.current = true;
     const dbName = `${selectedIlRef.current}_${selectedGesRef.current}`;
-    console.log("çekiliyoor");
     try {
       // Türkiye saati için özel format
       const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
       const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
-      console.log(dbName, selectedAracRef.current, undefined, startTimeStr, endTimeStr)
       const records = await window.electronAPI.getTablesHistory(dbName, selectedAracRef.current, undefined, startTimeStr, endTimeStr);
   
       if (records && records.length > 0) {
@@ -603,7 +649,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
           const existingData = comparisonSeries.data.values as ChartDataPoint[];
           const combinedData = [...lineData, ...existingData];
           comparisonSeries.data.setAll(combinedData);
-          console.log(`📈 Comparison series updated: ${seriesKey}`, { newPoints: lineData.length, totalPoints: combinedData.length });
         }
       }
     } catch (error) {
@@ -654,7 +699,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
 
 
       const minTimestamp = Math.min(...allTimeStamps)
-      console.log("🔄 Paralel geçmiş veri yükleme başlatılıyor");
       // Tüm yükleme işlemlerini topla
       const allLoads: Promise<any>[] = [];
       // Ana mum serisi için kontrol
@@ -665,9 +709,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
           if (dateMin - oldestTimestamp < 5*60*60*1000) {
             const from = new Date(oldestTimestamp - intervalMs);       
             const to = new Date(oldestTimestamp);
-            
-            console.log("📈 Ana mum serisi için geçmiş veri yükleniyor", from, to);
-
             allLoads.push(loadHistoricalCandlestickData(from, to ));
             isLoading.current = true;
           }
@@ -691,7 +732,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
               if (dateMin - oldestTimestamp < 5*60*60*1000) {
                 const fromCom = new Date(oldestTimestamp - intervalMs);       
                 const toCom = new Date(oldestTimestamp);
-                console.log("📊 Karşılaştırma serisi için geçmiş veri yükleniyor", il, ges, arac, variableName, fromCom, toCom);
                 allLoads.push(loadHistoricalComparisonData(il, ges, arac, variableName, fromCom, toCom));
                 isLoading.current = true;
               }
@@ -703,12 +743,10 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
       // Tüm yükleme işlemlerini paralel olarak çalıştır
       if (allLoads.length > 0) {
         try {
-          console.log(`🚀 ${allLoads.length} adet geçmiş veri yükleme işlemi başlatılıyor...`);
           await Promise.allSettled(allLoads).then((results) => {
             const succeeded = results.filter(r => r.status === 'fulfilled').length;
             const failed = results.filter(r => r.status === 'rejected').length;
             isLoading.current = false;
-            console.log(`✅ Geçmiş veri yükleme tamamlandı: ${succeeded} başarılı, ${failed} başarısız`);
           });
     
         } catch (error) {
@@ -726,83 +764,95 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   }, [hasZoomedInitially, comparisonSelections]);
   
   const addComparisonLine = async (key: string, variableName: string) => {
-    console.log(`📊 Adding comparison line:`, { key, variableName });
     if (!rootRef.current || !chartRef.current || !dateAxisRef.current || !valueAxisRef.current) {
-      console.warn('⚠️ Chart references not ready for comparison line.');
-      return;
+      return { success: false, message: 'Grafik referansları hazır değil' };
     }
   
     const chart = chartRef.current;
     const mainPanel = chart.panels.getIndex(0);
-    if (!mainPanel) return;
+    if (!mainPanel) return { success: false, message: 'Ana panel bulunamadı' };
   
     const [il, ges, arac] = key.split('/');
     const dbName = `${il}_${ges}`;
     const variableConfig = dropdownData?.[il]?.[ges]?.[arac]?.find(v => v.name === variableName);
     if (!variableConfig) {
-      console.warn(`⚠️ Variable config not found for comparison line:`, { key, variableName });
-      return;
+      return { success: false, message: `Değişken konfigürasyonu bulunamadı: ${variableName}` };
     }
-  
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - 10 * 60 * 60 * 1000); // son 10 saat
-    console.log(`📥 Fetching historical data for comparison line:`, { dbName, arac, startTime, endTime });
-    
     // Türkiye saati için özel format
     const startTimeStr = startTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
     const endTimeStr = endTime.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).replace(' ', 'T');
     
     const rawRecords = await window.electronAPI.getTablesHistory(dbName, arac, undefined, startTimeStr, endTimeStr);
-    console.log(`✅ Historical data received for comparison line:`, { recordCount: rawRecords?.length || 0 });
-  
+    if (rawRecords.length === 0){
+      return { success: false, message: `${dbName}/${arac} için son 10 saatte veri bulunamadı` };
+    }
+    
     const rawData: ChartDataPoint[] = rawRecords.map(record => ({
       timestamp: new Date(record.timestamp).getTime(),
       value: variableName === "p" ? Math.abs(Number(record[variableName])) : Number(record[variableName]) // p değişkeni için pozitife çevir
     })).filter(d => !isNaN(d.value));
-  
-    console.log(`🔧 Creating chart data for comparison line with worker...`);
+
     const lineData = await window.electronAPI.getChartData({
       data: rawData,
       timeUnit: timeIntervalRef.current.timeUnit,
       count: timeIntervalRef.current.count,
       chartType: 'line'
     }) as ChartDataPoint[];
-    //console.log(`📈 Chart data created for comparison line:`, { dataPointCount: lineData?.length || 0 });
-  
+
     // Renk seçimi - mevcut karşılaştırma serilerinin sayısına göre
     const currentComparisonCount = getLineSeriesCount(chartRef.current);
     const colorIndex = currentComparisonCount % COMPARISON_COLORS.length;
     const selectedColor = COMPARISON_COLORS[colorIndex];
-  
-    const series = am5xy.LineSeries.new(rootRef.current, {
-      name: `${key}-${variableName}`,
-      valueXField: "timestamp",
-      valueYField: "value",
-      xAxis: dateAxisRef.current,
-      yAxis: valueAxisRef.current,
-      stroke: am5.color(selectedColor),
-      tooltip: am5.Tooltip.new(rootRef.current, {
-        labelText: `{name}\n[bold]{valueY}[/]`,
-        pointerOrientation: "right",
-        getFillFromSprite: false,
-        background: am5.RoundedRectangle.new(rootRef.current, {
-          fill: am5.color(selectedColor),
-          stroke: am5.color(selectedColor),
-        }),
-        autoTextColor:true
-        
-      })
+    
+    // Renk state'ini güncelle
+    const seriesKey = `${key}-${variableName}`;
+    // Renk state'ini senkron olarak güncelle
+    setComparisonColors(prev => {
+      const updated = { ...prev, [seriesKey]: selectedColor };
+      return updated;
     });
-
-
-    // Çizgi kalınlığı ve şeffaflığını ayarla
-    series.strokes.template.setAll({
-      strokeWidth: 2,
-      strokeOpacity: 0.8
-    });
+    
+    // State güncellemesinin tamamlanmasını bekle
+    await new Promise(resolve => setTimeout(resolve, 0));
   
-    series.data.setAll(lineData);
-    mainPanel.series.push(series);
+    let series: am5xy.LineSeries;
+    try {
+      series = am5xy.LineSeries.new(rootRef.current, {
+        name: `${key}-${variableName}`,
+        valueXField: "timestamp",
+        valueYField: "value",
+        xAxis: dateAxisRef.current,
+        yAxis: valueAxisRef.current,
+        stroke: am5.color(selectedColor),
+        tooltip: am5.Tooltip.new(rootRef.current, {
+          labelText: `{name}\n[bold]{valueY}[/]`,
+          pointerOrientation: "right",
+          getFillFromSprite: false,
+          background: am5.RoundedRectangle.new(rootRef.current, {
+            fill: am5.color(selectedColor),
+            stroke: am5.color(selectedColor),
+          }),
+          autoTextColor:true
+        })
+      });
+
+      // Çizgi kalınlığı ve şeffaflığını ayarla
+      series.strokes.template.setAll({
+        strokeWidth: 2,
+        strokeOpacity: 0.8
+      });
+    
+      // Önce seriyi panele ekle
+      mainPanel.series.push(series);
+      
+      // Sonra veriyi set et
+      series.data.setAll(lineData);
+    } catch (error) {
+      console.error(`❌ LineSeries oluşturma hatası (${key}-${variableName}):`, error);
+      return { success: false, message: `LineSeries oluşturulamadı: ${error}` };
+    }
 
     // Karşılaştırma serisi eklendiğinde hasZoomedInitially'i true yap
     if (!hasZoomedInitially && lineData.length > 0) {
@@ -820,7 +870,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
             const beforeMax = axis.getPrivate("selectionMax");
           
             axis.zoomToDates(new Date(start), new Date(end));
-            console.log("🔍 Comparison line initial zoom başlatıldı...");
           
             // Zoom işleminin tamamlanmasını bekle
             setTimeout(() => {
@@ -828,7 +877,6 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
               const afterMax = axis.getPrivate("selectionMax");
           
               if (afterMin !== beforeMin || afterMax !== beforeMax) {
-                console.log("✅ Comparison line zoom gerçekten değişti, setHasZoomedInitially true yapılıyor");
                 setHasZoomedInitially(true);
               } else {
                 console.log("⚠️ Comparison line zoom değeri değişmedi, setHasZoomedInitially yapılmadı");
@@ -843,10 +891,9 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     const mqttIl = il.charAt(0).toUpperCase() + il.slice(1);
     const mqttGes = ges.charAt(0).toUpperCase() + ges.slice(1);
     const cihazGrubu = getCihazGrubu(arac);
-    if (!cihazGrubu) return;
+    if (!cihazGrubu) return { success: false, message: `Cihaz grubu belirlenemedi: ${arac}` };
   
     const topic = `${mqttIl}/${mqttGes}/${cihazGrubu}/${arac}`;
-    console.log(`📡 Subscribing to MQTT for comparison line:`, { topic });
     await window.electronAPI.subscribeMqtt(topic);
   
     const unsubscribe = window.electronAPI.onMqttData(async (data, incomingTopic) => {
@@ -895,8 +942,9 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     if (typeof unsubscribe === "function") {
       const seriesKey = `${key}-${variableName}`;
       comparisonUnsubscribeRefs.current.set(seriesKey, unsubscribe);
-      console.log(`📡 MQTT unsubscribe fonksiyonu kaydedildi: ${seriesKey}`);
     }
+
+    return { success: true, message: `${key}/${variableName} karşılaştırma çizgisi başarıyla eklendi (${lineData.length} veri noktası)` };
   };
   // Karşılaştırma serilerini yönetmek için useEffect
   useEffect(() => {
@@ -904,11 +952,12 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     const prevKeys = Object.keys(prevComparisonSelections.current);
     const currentKeys = Object.keys(comparisonSelections);
 
-    // Kaldırılan serileri temizle
+    // Kaldırılan serileri temizle - sadece tamamen kaldırılan key'ler için
     const removedKeys = prevKeys.filter(key => !currentKeys.includes(key));
     removedKeys.forEach(key => {
       const seriesToRemove = findLineSeriesByPrefix(chartRef.current, key);
       seriesToRemove.forEach(series => {
+        const seriesName = series.get("name") as string;
         series.dispose();
       });       
       
@@ -920,20 +969,70 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
         if (unsubscribeFn) {
           unsubscribeFn();
           comparisonUnsubscribeRefs.current.delete(seriesKey);
-          console.log(`📡 Kaldırılan seri için MQTT UNSUBSCRIBE: ${seriesKey}`);
         }
       });
     });
 
     // **YENİ EKLENEN** serileri işle
     const addedKeys = currentKeys.filter(key => !prevKeys.includes(key));
-    addedKeys.forEach(key => {
-      const variables = comparisonSelections[key];
-      variables.forEach(variableName => {
-        addComparisonLine(key, variableName);
-      });
-    });
-
+    if (addedKeys.length > 0) {
+      setIsLoadingComparison(true);
+      
+      const processAddedKeys = async () => {
+        for (const key of addedKeys) {
+          const variables = comparisonSelections[key];
+          for (const variableName of variables) {
+            try {
+              const result = await addComparisonLine(key, variableName);
+              if (result.success) {
+                // Başarılı durumda kullanıcıya bildirim göster
+                showNotification(result.message, 'success');
+              } else {
+                console.warn(`❌ ${result.message}`);
+                // Başarısız durumda kullanıcıya uyarı göster
+                showNotification(result.message, 'error');
+                
+                // Başarısız olan seriyi comparisonSelections'dan kaldır
+                setComparisonSelections(prev => {
+                  const updated = { ...prev };
+                  if (updated[key] && Array.isArray(updated[key])) {
+                    updated[key] = updated[key].filter(v => v !== variableName);
+                    if (updated[key].length === 0) {
+                      delete updated[key];
+                    }
+                  }
+                  return updated;
+                });
+              }
+            } catch (error) {
+              console.error(`❌ Karşılaştırma serisi eklenirken hata:`, error);
+              showNotification(`${key}/${variableName} eklenirken beklenmeyen hata oluştu`, 'error');
+              
+              // Hata durumunda da seriyi kaldır
+              setComparisonSelections(prev => {
+                const updated = { ...prev };
+                if (updated[key] && Array.isArray(updated[key])) {
+                  updated[key] = updated[key].filter(v => v !== variableName);
+                  if (updated[key].length === 0) {
+                    delete updated[key];
+                  }
+                }
+                return updated;
+              });
+            }
+          }
+        }
+        
+        // Tüm seriler eklendikten sonra loading state'ini false yap
+        setIsLoadingComparison(false);
+      };
+      
+      processAddedKeys();
+    } else {
+      // Eklenecek seri yoksa loading state'ini false yap
+      setIsLoadingComparison(false);
+    }
+    
     // Referansı güncelle
     prevComparisonSelections.current = { ...comparisonSelections };
     
@@ -941,11 +1040,9 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
 
     // Component unmount olduğunda tüm MQTT aboneliklerini temizle
   useEffect(() => {
-      return () => {
-        console.log("🔄 Overview component unmount - Tüm MQTT abonelikleri temizleniyor...");      
+      return () => {   
         // Tüm unsubscribe fonksiyonlarını çağır
         comparisonUnsubscribeRefs.current.forEach(unsubscribe => {
-          console.log("📡 Component unmount - Karşılaştırma MQTT UNSUBSCRIBE fonksiyonu çağrılıyor");
           if (typeof unsubscribe === 'function') {
             unsubscribe();
           }
@@ -1063,15 +1160,13 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   };
 
   const handleComparisonSeriesSelect = (il: string, ges: string, arac: string, variables: string[]) => {
-    // Ayrı state'leri güncelle
     setSelectedComparisonIl(il);
     setSelectedComparisonGes(ges);
     setSelectedComparisonArac(arac);
-    
     const key = `${il}/${ges}/${arac}`;
     setComparisonSelections(prev => {
       const updated = { ...prev };
-      if (variables.length > 0) {
+      if (variables && Array.isArray(variables) && variables.length > 0) {
         updated[key] = variables;
       } else {
         delete updated[key];
@@ -1081,48 +1176,95 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
   };
 
   // Karşılaştırma çizgisinin rengini değiştir
-  const changeComparisonLineColor = (seriesName: string, newColor: string) => {
+  const changeComparisonLineColor = useCallback((seriesName: string, newColor: string) => {
+    console.log(`🎨 Renk değiştiriliyor: ${seriesName} -> ${newColor}`);
     const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       series.set("stroke", am5.color(newColor));
       series.get("tooltip")?.get("background")?.set("fill", am5.color(newColor));
       series.get("tooltip")?.get("background")?.set("stroke", am5.color(newColor));
       // Renk state'ini güncelle
-      setComparisonColors(prev => ({
-        ...prev,
-        [seriesName]: newColor
-      }));
+      setComparisonColors(prev => {
+        const updated = { ...prev, [seriesName]: newColor };
+        console.log(`🔄 comparisonColors güncellendi:`, updated);
+        return updated;
+      });
     }
-  };
+  }, []);
 
   // Karşılaştırma çizgisinin stilini değiştir (kesikli, düz, noktalı)
-  const changeComparisonLineStyle = (seriesName: string, style: 'solid' | 'dashed' | 'dotted') => {
+  const changeComparisonLineStyle = useCallback((seriesName: string, style: 'solid' | 'dashed' | 'dotted') => {
     const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       const dashArray = style === 'dashed' ? [5, 5] : style === 'dotted' ? [2, 2] : undefined;
       series.strokes.template.set("strokeDasharray", dashArray);
       
     }
-  };
+  }, []);
 
   // Karşılaştırma çizgisinin kalınlığını değiştir
-  const changeComparisonLineWidth = (seriesName: string, width: number) => {
+  const changeComparisonLineWidth = useCallback((seriesName: string, width: number) => {
     const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
       series.strokes.template.set("strokeWidth", width);
       
     }
-  };
+  }, []);
 
   // Karşılaştırma çizgisini kaldır
-  const removeComparisonLine = (seriesName: string) => {
-    console.log(`🗑️ Removing comparison line: ${seriesName}`);
+  const removeComparisonLine = useCallback(async (seriesName: string) => {
+    console.log(`🗑️ removeComparisonLine çağrıldı: ${seriesName}`);
     
-    // Seriyi grafikten kaldır
+    // comparisonSelections state'ini güncelle - daha güvenli split
+    const lastDashIndex = seriesName.lastIndexOf('-');
+    if (lastDashIndex > 0 && lastDashIndex < seriesName.length - 1) {
+      const key = seriesName.substring(0, lastDashIndex);
+      const variableName = seriesName.substring(lastDashIndex + 1);
+      
+      console.log(`🔍 Parsed: key="${key}", variable="${variableName}"`);
+      
+      setComparisonSelections(prev => {
+        console.log(`📊 Önceki comparisonSelections:`, prev);
+        const updated = { ...prev };
+        if (updated[key] && Array.isArray(updated[key])) {
+          const beforeLength = updated[key].length;
+          updated[key] = updated[key].filter(v => v !== variableName);
+          const afterLength = updated[key].length;
+          
+          console.log(`🔄 ${key} serisinden ${variableName} kaldırıldı. Önceki: ${beforeLength}, Sonraki: ${afterLength}, Kalan: [${updated[key].join(', ')}]`);
+          
+          if (updated[key].length === 0) {
+            delete updated[key];
+            console.log(`🗑️ ${key} tamamen kaldırıldı (son variable'ı)`);
+          }
+        } else {
+          console.warn(`⚠️ ${key} bulunamadı veya array değil:`, updated[key]);
+        }
+        console.log(`📊 Yeni comparisonSelections:`, updated);
+        return updated;
+      });
+      
+      // State güncellemesinin tamamlanmasını bekle
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } else {
+      console.error(`❌ Seri adı parse edilemedi: ${seriesName}. lastDashIndex: ${lastDashIndex}`);
+    }
+    
+    // Seriyi grafikten kaldır - SADECE tam olarak eşleşen seri
     const series = findLineSeriesByName(chartRef.current, seriesName);
     if (series) {
+      console.log(`✅ Seri bulundu ve dispose ediliyor: ${seriesName}`);
       series.dispose();
-      console.log(`📊 Series disposed: ${seriesName}`);
+      console.log(`✅ Seri grafikten kaldırıldı: ${seriesName}`);
+    } else {
+      console.warn(`⚠️ Grafik'te seri bulunamadı: ${seriesName}`);
+      // Fallback: prefix ile arama yap ama sadece tam eşleşenleri kaldır
+      const allSeries = getAllLineSeries(chartRef.current);
+      const matchingSeries = allSeries.filter(s => s.get("name") === seriesName);
+      if (matchingSeries.length > 0) {
+        console.log(`🔄 Fallback: ${matchingSeries.length} seri bulundu, dispose ediliyor`);
+        matchingSeries.forEach(s => s.dispose());
+      }
     }
     
     // MQTT unsubscribe işlemini yap
@@ -1131,30 +1273,39 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
       unsubscribeFn();
       comparisonUnsubscribeRefs.current.delete(seriesName);
       console.log(`📡 MQTT unsubscribe completed: ${seriesName}`);
-    }
-    
-    // comparisonSelections state'ini güncelle
-    const [key, variableName] = seriesName.split('-');
-    if (key && variableName) {
-      setComparisonSelections(prev => {
-        const updated = { ...prev };
-        if (updated[key]) {
-          updated[key] = updated[key].filter(v => v !== variableName);
-          if (updated[key].length === 0) {
-            delete updated[key];
-          }
-        }
-        return updated;
-      });
+    } else {
+      console.warn(`⚠️ MQTT unsubscribe fonksiyonu bulunamadı: ${seriesName}`);
     }
     
     // Renk state'inden de kaldır
     setComparisonColors(prev => {
       const updated = { ...prev };
       delete updated[seriesName];
+      console.log(`🎨 Renk state'inden kaldırıldı: ${seriesName}`);
       return updated;
     });
-  };
+  }, []);
+
+  // Tüm karşılaştırma serilerini kaldır
+  const removeAllComparisonLines = useCallback(() => {
+    // Tüm MQTT aboneliklerini kapat
+    comparisonUnsubscribeRefs.current.forEach(unsubscribe => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    });
+    comparisonUnsubscribeRefs.current.clear();
+    
+    // Tüm karşılaştırma serilerini grafikten kaldır
+    disposeAllLineSeries(chartRef.current);
+    
+    // State'leri temizle
+    setComparisonSelections({});
+    setComparisonColors({});
+    
+    // Kullanıcıya bildirim göster
+    showNotification('Tüm karşılaştırma serileri kaldırıldı', 'info');
+  }, [showNotification]);
 
   // Popup sürükleme işlevselliği
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1220,13 +1371,35 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
 
   // Karşılaştırma çizgi ayarları listesini oluştur
   const comparisonLineSettings = useMemo(() => {
+    // Line ekleme işlemi devam ediyorsa boş liste döndür
+    if (isLoadingComparison) {
+      console.log(`⏳ Loading devam ediyor, boş liste döndürülüyor`);
+      return [];
+    }
+    
     const allLineSeries = getAllLineSeries(chartRef.current);
-    return allLineSeries
-      .filter(series => series && !series.isDisposed())
+    console.log(`📈 Bulunan LineSeries sayısı:`, allLineSeries.length);
+    console.log(`🎨 Mevcut comparisonColors:`, comparisonColors);
+    
+    // Sadece comparisonColors state'inde renk olan serileri göster
+    const validSeries = allLineSeries.filter(series => {
+      if (!series || series.isDisposed()) return false;
+      const seriesName = series.get("name") as string;
+      return seriesName && comparisonColors[seriesName];
+    });
+    
+    console.log(`✅ Geçerli seri sayısı:`, validSeries.length);
+    
+    return validSeries
       .map((series, index) => {
-        const seriesName = series.get("name") as string;   
-        const currentColor = comparisonColors[seriesName] || COMPARISON_COLORS[index % COMPARISON_COLORS.length];
+        const seriesName = series.get("name") as string;
+        const currentColor = comparisonColors[seriesName];
         
+        console.log(`🔍 Seri ${index}: ${seriesName}, Renk: ${currentColor}`);
+        if (!seriesName || !currentColor) {
+          console.log(`❌ Seri ${seriesName} için renk bulunamadı, atlanıyor`);
+          return null;
+        }
         return (
           <div key={seriesName} className="comparison-line-item">
             <label title={seriesName}>{seriesName}</label>
@@ -1237,28 +1410,31 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
               onChange={(e) => changeComparisonLineColor(seriesName, e.target.value)}
               title="Renk seç"
             />
-            <select
-              className="line-style-select"
-              defaultValue={series.strokes.template.get("strokeDasharray") ? "dashed" : "solid"}
-              onChange={(e) => changeComparisonLineStyle(seriesName, e.target.value as 'solid' | 'dashed' | 'dotted')}
-              title="Çizgi stili"
-            >
-              <option value="solid">Düz</option>
-              <option value="dashed">Kesikli</option>
-              <option value="dotted">Noktalı</option>
-            </select>
-            <input
-              type="number"
-              className="line-width-input"
-              min="1"
-              max="10"
-              defaultValue={series.strokes.template.get("strokeWidth")}
-              onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
-              title="Çizgi kalınlığı"
-            />
+              <>
+                <select
+                  className="line-style-select"
+                  defaultValue={series.strokes.template.get("strokeDasharray") ? "dashed" : "solid"}
+                  onChange={(e) => changeComparisonLineStyle(seriesName, e.target.value as 'solid' | 'dashed' | 'dotted')}
+                  title="Çizgi stili"
+                >
+                  <option value="solid">Düz</option>
+                  <option value="dashed">Kesikli</option>
+                  <option value="dotted">Noktalı</option>
+                </select>
+                <input
+                  type="number"
+                  className="line-width-input"
+                  min="1"
+                  max="10"
+                  defaultValue={series.strokes.template.get("strokeWidth")}
+                  onChange={(e) => changeComparisonLineWidth(seriesName, Number(e.target.value))}
+                  title="Çizgi kalınlığı"
+                />
+              </>
+          
             <button
               className="remove-series-btn"
-              onClick={() => removeComparisonLine(seriesName)}
+              onClick={async () => await removeComparisonLine(seriesName)}
               title="Seriyi kaldır"
             >
               ×
@@ -1266,10 +1442,40 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
           </div>
         );
       });
-  }, [comparisonColors, changeComparisonLineColor, changeComparisonLineStyle, changeComparisonLineWidth, removeComparisonLine]);
+    }, [isLoadingComparison, comparisonColors, changeComparisonLineColor, changeComparisonLineStyle, changeComparisonLineWidth, removeComparisonLine]);
 
     return (
     <div className={`overview-container ${!visible ? 'hidden' : ''}`}>
+      {/* Bildirimler */}
+      <div className="notifications-container">
+        {notifications.map(notification => (
+          <div 
+            key={notification.id} 
+            className={`notification notification-${notification.type}`}
+            onClick={() => removeNotification(notification.id)}
+          >
+            <div className="notification-content">
+              <span className="notification-icon">
+                {notification.type === 'success' && '✅'}
+                {notification.type === 'error' && '❌'}
+                {notification.type === 'warning' && '⚠️'}
+                {notification.type === 'info' && 'ℹ️'}
+              </span>
+              <span className="notification-message">{notification.message}</span>
+              <button 
+                className="notification-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeNotification(notification.id);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="chart-controls">
         <div className="control-group">
           <img 
@@ -1348,7 +1554,21 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
                 ×
               </button>
             </h4>
-            {comparisonLineSettings}
+            <button
+              className="remove-all-series-btn"
+              onClick={removeAllComparisonLines}
+              title="Tüm Karşılaştırma Serilerini Kaldır"
+            >
+              🗑️ Tümünü Kaldır
+            </button>
+            {isLoadingComparison ? (
+              <div className="loading-indicator">
+                <div className="spinner"></div>
+                <span>Çizgiler ekleniyor...</span>
+              </div>
+            ) : (
+              comparisonLineSettings
+            )}
           </div>
         )}
         

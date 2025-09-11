@@ -52,8 +52,16 @@ export const findLineSeriesByPrefix = (chart: am5stock.StockChart | null, prefix
   if (!chart) return matchingSeries;
   
   chart.panels.getIndex(0)?.series.each((series: any) => {
-    if (series instanceof am5xy.LineSeries && series.get("name")?.startsWith(prefix)) {
-      matchingSeries.push(series);
+    if (series instanceof am5xy.LineSeries) {
+      const seriesName = series.get("name");
+      // Daha kesin prefix matching: prefix'ten sonra / veya - olmalı
+      if (seriesName && (
+        seriesName === prefix || 
+        seriesName.startsWith(prefix + '/') || 
+        seriesName.startsWith(prefix + '-')
+      )) {
+        matchingSeries.push(series);
+      }
     }
   });
   
@@ -75,7 +83,7 @@ export const getLineSeriesCount = (chart: am5stock.StockChart | null): number =>
       count++;
     }
   });
-  
+  //console.log("------------------------------- count", count);      ÖNEMLİİİ
   return count;
 };
 

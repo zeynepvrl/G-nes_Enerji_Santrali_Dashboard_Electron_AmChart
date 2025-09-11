@@ -72,6 +72,11 @@
   background: #ffffff;
 }
 
+.navbar-logo {
+  width: 55px;
+  height: 40px;
+}
+
 .nav-icon {
   font-size: 1.1rem;
   width: 20px;

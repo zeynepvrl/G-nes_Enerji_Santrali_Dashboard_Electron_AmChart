@@ -1,6 +1,6 @@
 {
   "name": "energy-dashboard",
-  "version": "1.0.15",
+  "version": "1.1.1",
   "description": "Energy Management Dashboard",
   "main": "main.js",
   "scripts": {
@@ -16,7 +16,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@amcharts/amcharts5": "^5.3.5",
+    "@amcharts/amcharts5": "^5.13.5",
     "@types/pg": "^8.12.0",
     "electron-log": "^5.4.0",
     "electron-updater": "^6.6.2",
