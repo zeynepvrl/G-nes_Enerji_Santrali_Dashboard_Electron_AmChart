@@ -72,7 +72,7 @@ export interface ElectronAPI {
   getChartData: (
     data: {
       data: ChartDataPoint[],
-      timeUnit: TimeInterval['timeUnit'],
+      timeUnit: TimeInterval['timeUnit'],  //bir type’ın içindeki belirli bir alanın tipini almak 
       count: number,
       chartType: ChartType
     }

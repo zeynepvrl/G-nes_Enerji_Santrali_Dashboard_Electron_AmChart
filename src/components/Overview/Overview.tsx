@@ -188,7 +188,7 @@ const Overview: React.FC<{visible: boolean}> = ({visible=true}) => {
     if (lower.startsWith('rtu')) return 'rtu';
     return '';
   }
- 
+
   useEffect(() => {
     if (!window.electronAPI?.getAllGESdbsAndTheirTablesForDropdowns) return;
     window.electronAPI.getAllGESdbsAndTheirTablesForDropdowns().then((allGesdbs: any) => {

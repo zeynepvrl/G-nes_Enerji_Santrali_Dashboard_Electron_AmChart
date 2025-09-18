@@ -26,37 +26,41 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
     
     // Spont olmayan verilerin başlangıç zamanlarını takip etmek için
     const [nonSpontaneousStartTimes, setNonSpontaneousStartTimes] = useState<Record<string, number>>({});
-        const gesInfoRef=useRef<Record<string,any>>({});
+    const gesInfoRef=useRef<Record<string,any>>({});
+    
+    // Uygulama açılış zamanını takip et
+    const appStartTime = useRef<number>(Date.now());
     
     // Gruplandırılmış veriler için state
     const [groupedMeasurements, setGroupedMeasurements] = useState<Record<string, Measurement[]>>({});
     
     const prevOutagesNames=useRef<Set<string>>(new Set());
-   
+
+    useEffect(()=> {console.log(nonSpontaneousStartTimes)},[nonSpontaneousStartTimes])
     const fetchData = async () => {
         try {
             const [measurementsRes, limitsRes] = await Promise.all([
                 window.electronAPI.getMssqlTables(),
                 window.electronAPI.getLimits()
             ]);
-            
-            // Spont olmayan verilerin başlangıç zamanlarını güncelle
+
             setNonSpontaneousStartTimes(prev => {
                 const newTimes = { ...prev };
-                
-                // Yeni gelen verilerde spont olanları temizle
+
+            
                 measurementsRes.forEach(measurement => {
-                    if (measurement.isSpontaneous && newTimes[measurement.name]) {
-                        //console.log(`🔄 ${measurement.name} tekrar spont hale geldi, başlangıç zamanı temizlendi`);
+                    if (measurement.isSpontaneous && Object.prototype.hasOwnProperty.call(newTimes,measurement.name)) {
+                        console.log("delete",measurement)
                         delete newTimes[measurement.name];
+                      
                     }
-                });
-                
-                // Yeni spont olmayan veriler için başlangıç zamanı ekle
-                measurementsRes.forEach(measurement => {
-                    if (!measurement.isSpontaneous && !newTimes[measurement.name]) {
-                        //console.log(`⚠️ ${measurement.name} spont olmayan duruma geçti, başlangıç zamanı kaydedildi`);
-                        newTimes[measurement.name] = new Date(measurement.DATUMZEIT).getTime();
+                    if (!measurement.isSpontaneous && !Object.prototype.hasOwnProperty.call(newTimes,measurement.name)) {
+                        const dataTime = new Date(measurement.DATUMZEIT).getTime();
+                        if (dataTime < appStartTime.current) {
+                            newTimes[measurement.name] = 0; // 0 = süre gösterme
+                        } else {
+                            newTimes[measurement.name] = dataTime;
+                        }
                     }
                 });
                 
@@ -83,14 +87,15 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
         }
     };
 
+
     useEffect(() => {
         fetchData();
         const interval = setInterval(fetchData, 10000);
         const getGesInfo= async ()=>{
             const gesInfoRes= await window.electronAPI.getGesInfo();
             gesInfoRef.current=gesInfoRes;
-            //console.log("🏢 GES Info yüklendi:", gesInfoRes);
-            //console.log("🏢 İlk GES örneği:", gesInfoRes[0]);
+            console.log("🏢 GES Info yüklendi:", gesInfoRes);
+            console.log("🏢 İlk GES örneği:", gesInfoRes[0]);
             
             // GES bilgileri değiştiğinde gruplandırmayı yenile
             if (measurements.length > 0) {
@@ -165,11 +170,6 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
 
     // Performanslı gruplandırma fonksiyonu - sadece gerektiğinde çalışır
     const getGroupedMeasurements = (measurements: Measurement[]) => {
-        //console.log("🔍 Gruplandırma başladı");
-        //console.log("📊 Measurements sayısı:", measurements.length);
-        //console.log("🏢 GES Info sayısı:", gesInfoRef.current.length);
-        
-        // Yeni gruplandırma yap
         const grouped: Record<string, Measurement[]> = {};
         
         measurements.forEach(measurement => {
@@ -321,15 +321,21 @@ const Alarms: React.FC<AlarmsProps> = ({ visible = true }) => {
                                                     {!isSpontaneous && (
                                                         <>
                                                             <span className="invalid-indicator">🔴</span>
-                                                            <span className="invalid-duration-small">
-                                                                {(() => {
-                                                                    const durationMs = Date.now() - (nonSpontaneousStartTimes[m.name] || new Date(m.DATUMZEIT).getTime());
-                                                                    const hours = Math.floor(durationMs / 3600000);
-                                                                    const minutes = Math.floor((durationMs % 3600000) / 60000);
-                                                                    const seconds = Math.floor((durationMs % 60000) / 1000);
-                                                                    return `${hours>0?`${hours}sa`:' '}${minutes>0?`${minutes}dk`:' '}${seconds>0?`${seconds}sn`:' '}`;
-                                                                })()}
-                                                            </span>
+                                                            {nonSpontaneousStartTimes[m.name] && nonSpontaneousStartTimes[m.name] > 0 ? (
+                                                                <span className="invalid-duration-small">
+                                                                    {(() => {
+                                                                        const durationMs = Date.now() - nonSpontaneousStartTimes[m.name];
+                                                                        const hours = Math.floor(durationMs / 3600000);
+                                                                        const minutes = Math.floor((durationMs % 3600000) / 60000);
+                                                                        const seconds = Math.floor((durationMs % 60000) / 1000);
+                                                                        return `${hours>0?`${hours}sa`:' '}${minutes>0?`${minutes}dk`:' '}${seconds>0?`${seconds}sn`:' '}`;
+                                                                    })()}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="invalid-duration-small" style={{ opacity: 0.7 }}>
+                                                                    Bir süredir Invalid
+                                                                </span>
+                                                            )}
                                                         </>
                                                     )}
                                                 </div>
