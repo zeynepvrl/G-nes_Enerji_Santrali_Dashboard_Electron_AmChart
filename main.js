@@ -22,6 +22,17 @@ autoUpdater.channel = 'latest';
 //const MAX_DB_RETRIES = 5; // Maksimum deneme sayısı
 const DB_RETRY_DELAY_MS = 600000; // 10 dakika (milisaniye)f
 
+// MSSQL bağlantı konfigürasyonu
+const mssqlConfig = {
+    server: '192.168.234.3\\prod19',
+    database: 'ZENON',
+    user: 'zenon',
+    password: 'zeN&N-8QL*',
+    options: {
+        encrypt: false,
+        trustServerCertificate: true
+    }
+};
 
 function createWindow () {
   mainWindow = new BrowserWindow({
@@ -107,7 +118,17 @@ function attemptInitialConnection() {
 
 // PostgreSQL bağlantı havuzu oluşturma
 function setupDatabase() {
-  
+  dbPool = new Pool({
+    user: 'zeynep',
+    host: '10.10.30.31',
+    database: 'postgres',
+    password: 'zeynep421',
+    port: 5432,
+    // Önerilen ayarlar:
+    // connectionTimeoutMillis: 5000, // Bağlantı zaman aşımı (ms)
+    // idleTimeoutMillis: 10000,      // Boştaki istemci zaman aşımı (ms)
+    // max: 10,                       // Havuzdaki maksimum istemci sayısı
+  });
 
   // Havuzda oluşabilecek genel hataları dinlemek için
   dbPool.on('error', (error, client) => {
@@ -123,7 +144,13 @@ function setupDatabase() {
 let facilityPool;
 
 function setupFacilityDatabase() {
-  
+  facilityPool = new Pool({
+    user: 'zeynep',
+    host: '10.10.30.31',
+    database: 'facility_info', 
+    password: 'zeynep421',
+    port: 5432,
+  });
 
   facilityPool.on('error', (err) => {
     console.error('❌ facility_info bağlantı hatası:', err.message);
